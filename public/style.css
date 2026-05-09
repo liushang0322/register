@@ -29,6 +29,7 @@ button {
 .topbar,
 .toolbar,
 .selected-panel,
+.diagnostic-section,
 .account-section,
 .mail-section,
 .sidebar,
@@ -78,6 +79,13 @@ h2 {
   padding: 12px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .btn-primary,
@@ -242,6 +250,7 @@ h2 {
 }
 
 .selected-panel,
+.diagnostic-section,
 .account-section,
 .mail-section {
   padding: 14px;
@@ -271,7 +280,7 @@ h2 {
 
 .account-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
   gap: 10px;
   align-items: end;
   margin: 12px 0;
@@ -292,7 +301,7 @@ h2 {
 
 .account-item {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1fr) minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(190px, 0.9fr) minmax(120px, 0.8fr) minmax(150px, 0.9fr) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid #e3e8ef;
@@ -307,8 +316,69 @@ h2 {
 }
 
 .account-item span,
-.account-item p {
+.account-item p,
+.check-summary span {
   font-size: 12px;
+}
+
+.check-summary span {
+  display: block;
+  color: #536173;
+}
+
+.diagnostic-result {
+  margin-top: 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 12px;
+  color: #536173;
+  font-size: 13px;
+}
+
+.diagnostic-title {
+  color: #1f2933;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.diagnostic-row {
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 9px;
+  background: #fff;
+}
+
+.diagnostic-row.ok {
+  border-color: #81c995;
+  background: #f0fbf3;
+}
+
+.diagnostic-row.bad {
+  border-color: #f3a6a0;
+  background: #fff5f4;
+}
+
+.diagnostic-row strong,
+.diagnostic-row span,
+.diagnostic-row p {
+  display: block;
+}
+
+.diagnostic-row span {
+  margin: 2px 0;
+  font-size: 12px;
+}
+
+.diagnostic-row p {
+  color: #536173;
+  font-size: 12px;
+  word-break: break-word;
 }
 
 .mail-grid {
@@ -343,6 +413,12 @@ h2 {
 
 .mail-time {
   margin-top: 5px;
+  font-size: 12px;
+}
+
+.mail-code {
+  margin-top: 4px;
+  color: #1769aa;
   font-size: 12px;
 }
 

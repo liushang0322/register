@@ -88,6 +88,7 @@ function renderSelectedPanel() {
   $("#selectedAddress").textContent = inbox ? inbox.address : "请选择或生成邮箱";
   $("#selectedMeta").textContent = inbox ? [inbox.note, inbox.password ? `密码：${inbox.password}` : ""].filter(Boolean).join(" / ") : "";
   $("#btnCopyAddress").disabled = !inbox;
+  $("#btnFetchMailbox").disabled = !inbox;
   $("#btnEditInbox").disabled = !inbox;
   $("#btnDeleteInbox").disabled = !inbox;
   if (inbox && !$("#accountId").value) $("#accountEmail").value = inbox.address;
@@ -104,23 +105,36 @@ function renderAccountList() {
   }
 
   list.forEach((account) => {
+    const check = account.lastCheck;
+    const siteLabel = check?.site?.skipped ? "未检测网站" : check?.site?.ok ? "网站可访问" : check ? "网站异常" : "未检测";
+    const mailLabel = check?.mailbox ? `${check.mailbox.mailCount} 封邮件` : "未抓取";
+    const codes = check?.mailbox?.latestCodes?.length ? `验证码：${check.mailbox.latestCodes.join(", ")}` : "";
+
     const item = document.createElement("div");
     item.className = "account-item";
     item.innerHTML = `
       <div>
         <strong>${esc(account.platform || "未命名平台")}</strong>
         <span>${esc(account.email)}</span>
+        <span>${esc(account.websiteUrl || "")}</span>
       </div>
       <div>
         <span>账号：${esc(account.username || "-")}</span>
         <span>密码：${esc(account.password || "-")}</span>
       </div>
       <p>${esc(account.note || "")}</p>
+      <div class="check-summary">
+        <span>${esc(siteLabel)}</span>
+        <span>${esc(mailLabel)}</span>
+        <span>${esc(codes)}</span>
+      </div>
       <div class="row-actions">
+        <button type="button" class="btn-small" data-action="check">检测</button>
         <button type="button" class="btn-small" data-action="edit">编辑</button>
         <button type="button" class="btn-small danger" data-action="delete">删除</button>
       </div>
     `;
+    item.querySelector('[data-action="check"]').addEventListener("click", () => checkAccount(account.id));
     item.querySelector('[data-action="edit"]').addEventListener("click", () => editAccount(account.id));
     item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteAccount(account.id));
     container.appendChild(item);
@@ -146,14 +160,31 @@ function renderMailList(list = currentMails) {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "mail-item" + (mail.id === currentMailId ? " active" : "");
+    const codeLine = mail.codes && mail.codes.length ? `<span class="mail-code">验证码：${esc(mail.codes.join(", "))}</span>` : "";
     item.innerHTML = `
       <span class="mail-from">${esc(mail.from || "")}</span>
       <span class="mail-subject">${esc(mail.subject || "(无主题)")}</span>
+      ${codeLine}
       <span class="mail-time">${fmtTime(mail.time)}</span>
     `;
     item.addEventListener("click", () => viewMail(mail.id));
     container.appendChild(item);
   });
+}
+
+function renderDiagnostic(title, rows) {
+  $("#diagnosticResult").innerHTML = `
+    <div class="diagnostic-title">${esc(title)}</div>
+    <div class="diagnostic-grid">
+      ${rows.map((row) => `
+        <div class="diagnostic-row ${row.ok ? "ok" : "bad"}">
+          <strong>${esc(row.name)}</strong>
+          <span>${row.ok ? "正常" : "异常"}</span>
+          <p>${esc(row.message || "")}</p>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 async function selectInbox(address) {
@@ -236,6 +267,78 @@ async function createInboxes(count) {
   }
 }
 
+async function runHealthCheck() {
+  try {
+    const data = await api("/api/health");
+    renderDiagnostic("系统检测", data.checks.map((item) => ({
+      name: item.name,
+      ok: item.ok,
+      message: item.message,
+    })));
+  } catch (e) {
+    renderDiagnostic("系统检测", [{ name: "health", ok: false, message: e.message }]);
+  }
+}
+
+async function runMailCaptureTest() {
+  try {
+    const data = await api("/api/diagnostics/mail-capture", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    await loadInboxes();
+    renderDiagnostic("收信和抓取检测", [
+      ...data.checks,
+      { name: "testInbox", ok: true, message: data.address },
+      { name: "capturedCode", ok: data.mailbox.latestCodes.includes(data.injectedCode), message: data.injectedCode },
+    ]);
+    await selectInbox(data.address);
+    toast("收信和抓取检测完成");
+  } catch (e) {
+    renderDiagnostic("收信和抓取检测", [{ name: "mailCapture", ok: false, message: e.message }]);
+  }
+}
+
+async function fetchCurrentMailbox() {
+  if (!currentAddress) return;
+  try {
+    const data = await api(`/api/inbox/${encodeURIComponent(currentAddress)}/mail-content?limit=20`);
+    renderMailList(data.mailbox.mails || []);
+    renderDiagnostic("邮箱内容抓取", [
+      { name: "mailbox", ok: true, message: currentAddress },
+      { name: "mailCount", ok: true, message: `${data.mailbox.mailCount} 封邮件` },
+      { name: "codeExtract", ok: data.mailbox.latestCodes.length > 0, message: data.mailbox.latestCodes.join(", ") || "未发现验证码" },
+    ]);
+    toast("邮箱内容已抓取");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function checkAccount(id) {
+  const account = accounts.find((item) => item.id === id);
+  if (!account) return;
+  try {
+    const data = await api(`/api/accounts/${encodeURIComponent(id)}/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ websiteUrl: account.websiteUrl }),
+    });
+    await loadAccounts();
+    if (data.account.email) {
+      currentAddress = data.account.email;
+      await loadInboxes();
+      renderSelectedPanel();
+      renderMailList(data.mails || []);
+    }
+    renderDiagnostic(`账号检测：${data.account.platform || data.account.email}`, [
+      { name: "site", ok: data.result.site.ok || data.result.site.skipped, message: data.result.site.message },
+      { name: "mailbox", ok: data.result.mailbox.ok, message: `${data.result.mailbox.mailCount} 封邮件` },
+      { name: "codes", ok: data.result.mailbox.latestCodes.length > 0, message: data.result.mailbox.latestCodes.join(", ") || "未发现验证码" },
+    ]);
+    toast("账号检测完成");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
 function openEditModal() {
   const inbox = getCurrentInbox();
   if (!inbox) return;
@@ -303,6 +406,7 @@ async function saveAccount(event) {
   const payload = {
     email: $("#accountEmail").value,
     platform: $("#accountPlatform").value,
+    websiteUrl: $("#accountWebsiteUrl").value,
     username: $("#accountUsername").value,
     password: $("#accountPassword").value,
     note: $("#accountNote").value,
@@ -330,6 +434,7 @@ function editAccount(id) {
   $("#accountId").value = account.id;
   $("#accountEmail").value = account.email || "";
   $("#accountPlatform").value = account.platform || "";
+  $("#accountWebsiteUrl").value = account.websiteUrl || "";
   $("#accountUsername").value = account.username || "";
   $("#accountPassword").value = account.password || "";
   $("#accountNote").value = account.note || "";
@@ -350,6 +455,7 @@ function resetAccountForm() {
   $("#accountId").value = "";
   $("#accountEmail").value = currentAddress || "";
   $("#accountPlatform").value = "";
+  $("#accountWebsiteUrl").value = "";
   $("#accountUsername").value = "";
   $("#accountPassword").value = "";
   $("#accountNote").value = "";
@@ -382,6 +488,9 @@ document.querySelectorAll("[data-create]").forEach((button) => {
 
 $("#btnCreateBatch").addEventListener("click", () => createInboxes($("#batchCount").value));
 $("#btnRefresh").addEventListener("click", () => loadAll().catch((e) => toast(e.message, "error")));
+$("#btnHealthCheck").addEventListener("click", runHealthCheck);
+$("#btnMailCaptureTest").addEventListener("click", runMailCaptureTest);
+$("#btnFetchMailbox").addEventListener("click", fetchCurrentMailbox);
 $("#inboxSearch").addEventListener("input", renderInboxList);
 $("#btnCopyAddress").addEventListener("click", async () => {
   if (!currentAddress) return;

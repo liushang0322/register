@@ -92,6 +92,81 @@ app.get("/register", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+app.get("/register/api/health", (req, res) => {
+  const checks = [];
+  let writable = false;
+  try {
+    const probe = path.join(DATA_DIR, `.health-${Date.now()}.tmp`);
+    fs.writeFileSync(probe, "ok");
+    fs.unlinkSync(probe);
+    writable = true;
+  } catch (e) {
+    checks.push({ name: "dataWrite", ok: false, message: e.message });
+  }
+
+  checks.push({ name: "server", ok: true, message: "running" });
+  checks.push({ name: "dataDir", ok: fs.existsSync(DATA_DIR), message: DATA_DIR });
+  checks.push({ name: "dataWrite", ok: writable, message: writable ? "writable" : "not writable" });
+  checks.push({ name: "mailStore", ok: true, message: `${inboxes.size} inboxes` });
+  checks.push({ name: "accountStore", ok: true, message: `${accounts.size} accounts` });
+
+  res.json({
+    ok: checks.every((item) => item.ok),
+    domain: DOMAIN,
+    dataDir: DATA_DIR,
+    inboxCount: inboxMeta.size,
+    accountCount: accounts.size,
+    checks,
+    time: new Date().toISOString(),
+  });
+});
+
+app.post("/register/api/diagnostics/mail-capture", async (req, res) => {
+  const address = extractEmail(req.body?.address) || `selftest-${Date.now()}@${DOMAIN}`.toLowerCase();
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const before = (inboxes.get(address) || []).length;
+  const raw = [
+    "From: Register Self Test <self-test@register.local>",
+    `To: ${address}`,
+    `Subject: Register mail capture test ${code}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    `This is a self-test message. Verification code: ${code}`,
+  ].join("\r\n");
+
+  try {
+    const parsed = await simpleParser(raw);
+    const recipients = collectRecipients(parsed, { raw, to: address, from: "self-test@register.local" });
+    for (const recipient of recipients) {
+      storeMail(recipient, parsed.from.text, parsed.subject, parsed.text || "", parsed.html || "");
+    }
+    if (!inboxMeta.has(address)) {
+      inboxMeta.set(address, { note: "系统自检邮箱", password: "", createdAt: new Date().toISOString() });
+    }
+    saveAll();
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+
+  const summary = summarizeMailbox(address, 5);
+  const after = (inboxes.get(address) || []).length;
+  res.json({
+    ok: after > before,
+    address,
+    injectedCode: code,
+    before,
+    after,
+    captured: after > before,
+    mailbox: summary,
+    checks: [
+      { name: "rawParse", ok: true, message: "raw mail parsed" },
+      { name: "webhookStore", ok: after > before, message: `${after - before} new message(s)` },
+      { name: "mailFetch", ok: summary.mailCount === after, message: `${summary.mailCount} message(s) readable` },
+      { name: "codeExtract", ok: summary.mails.some((mail) => mail.codes.includes(code)), message: code },
+    ],
+  });
+});
+
 app.post("/register/api/inbox/create", (req, res) => {
   const address = createInbox();
   saveAll();
@@ -159,7 +234,7 @@ app.get("/register/api/accounts", (req, res) => {
 });
 
 app.post("/register/api/accounts", (req, res) => {
-  const account = normalizeAccount(req.body);
+  const account = normalizeAccount(req.body || {});
   if (!account.email) {
     return res.status(400).json({ ok: false, error: "email is required" });
   }
@@ -176,13 +251,45 @@ app.put("/register/api/accounts/:id", (req, res) => {
   if (!account) {
     return res.status(404).json({ ok: false, error: "account not found" });
   }
-  const next = normalizeAccount({ ...account, ...req.body });
+  const next = { ...account, ...normalizeAccount({ ...account, ...(req.body || {}) }) };
   next.id = account.id;
   next.createdAt = account.createdAt;
   next.updatedAt = new Date().toISOString();
   accounts.set(next.id, next);
   saveAll();
   res.json({ ok: true, account: next });
+});
+
+app.post("/register/api/accounts/:id/check", async (req, res) => {
+  const account = accounts.get(req.params.id);
+  if (!account) {
+    return res.status(404).json({ ok: false, error: "account not found" });
+  }
+
+  const websiteUrl = normalizeUrl(req.body?.websiteUrl || account.websiteUrl || account.platform);
+  const mailSnapshot = summarizeMailbox(account.email, 10);
+  const siteCheck = await checkWebsite(websiteUrl);
+  const result = {
+    checkedAt: new Date().toISOString(),
+    websiteUrl,
+    site: siteCheck,
+    mailbox: {
+      ok: inboxes.has(account.email),
+      email: account.email,
+      mailCount: mailSnapshot.mailCount,
+      latestAt: mailSnapshot.latestAt,
+      latestCodes: mailSnapshot.latestCodes,
+      latestSubjects: mailSnapshot.mails.slice(0, 3).map((mail) => mail.subject),
+    },
+  };
+
+  account.websiteUrl = websiteUrl || account.websiteUrl || "";
+  account.lastCheck = result;
+  account.updatedAt = result.checkedAt;
+  accounts.set(account.id, account);
+  saveAll();
+
+  res.json({ ok: true, account, result, mails: mailSnapshot.mails });
 });
 
 app.delete("/register/api/accounts/:id", (req, res) => {
@@ -209,6 +316,14 @@ app.get("/register/api/inbox/:name", (req, res) => {
     list,
     meta: meta || { note: "", password: "" },
   });
+});
+
+app.get("/register/api/inbox/:name/mail-content", (req, res) => {
+  const address = extractEmail(req.params.name);
+  if (!address || !inboxes.has(address)) {
+    return res.status(404).json({ ok: false, error: "inbox not found" });
+  }
+  res.json({ ok: true, mailbox: summarizeMailbox(address, parseInt(req.query.limit, 10) || 20) });
 });
 
 app.get("/register/api/inbox/:name/:id", (req, res) => {
@@ -304,6 +419,7 @@ function normalizeAccount(input) {
     platform: String(input.platform || "").trim(),
     username: String(input.username || "").trim(),
     password: String(input.password || "").trim(),
+    websiteUrl: String(input.websiteUrl || "").trim(),
     note: String(input.note || "").trim(),
   };
 }
@@ -381,6 +497,93 @@ function storeMail(addr, from, subject, text, html) {
     html,
   });
   notifySSE(addr);
+}
+
+function stripHtml(html) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractCodesFromText(text) {
+  const source = String(text || "");
+  const numeric = source.match(/\b\d{4,8}\b/g) || [];
+  const values = [];
+  const labelled = /(?:验证码|verification code|verify code|code)[:：\s-]{1,12}([A-Z0-9]{4,10})/gi;
+  let match;
+  while ((match = labelled.exec(source)) !== null) {
+    values.push(match[1]);
+  }
+  return Array.from(new Set([...numeric, ...values].filter(Boolean))).slice(0, 8);
+}
+
+function summarizeMailbox(address, limit) {
+  const mails = [...(inboxes.get(address) || [])].sort((a, b) => new Date(b.time) - new Date(a.time));
+  const summaries = mails.slice(0, Math.min(Math.max(limit || 20, 1), 50)).map((mail) => {
+    const plain = mail.text || stripHtml(mail.html);
+    const snippet = plain.replace(/\s+/g, " ").trim().slice(0, 240);
+    const codes = extractCodesFromText(`${mail.subject || ""} ${plain}`);
+    return {
+      id: mail.id,
+      from: mail.from,
+      to: mail.to,
+      subject: mail.subject,
+      time: mail.time,
+      snippet,
+      codes,
+    };
+  });
+  return {
+    address,
+    mailCount: mails.length,
+    latestAt: mails[0]?.time || "",
+    latestCodes: Array.from(new Set(summaries.flatMap((mail) => mail.codes))).slice(0, 10),
+    mails: summaries,
+  };
+}
+
+function normalizeUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    if (!url.hostname.includes(".")) return "";
+    return url.toString();
+  } catch (e) {
+    return "";
+  }
+}
+
+async function checkWebsite(url) {
+  if (!url) {
+    return { ok: false, skipped: true, message: "未填写网站 URL" };
+  }
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "User-Agent": "register-health-check/1.0" },
+    });
+    return {
+      ok: response.status >= 200 && response.status < 500,
+      status: response.status,
+      finalUrl: response.url,
+      elapsedMs: Date.now() - started,
+      message: response.status >= 200 && response.status < 400 ? "网站可访问" : "网站有响应但状态异常",
+    };
+  } catch (e) {
+    return { ok: false, status: 0, elapsedMs: Date.now() - started, message: e.name === "AbortError" ? "访问超时" : e.message };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 app.delete("/register/api/inbox/:name/mail/:id", (req, res) => {

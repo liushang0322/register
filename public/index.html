@@ -13,7 +13,10 @@
         <h1>临时邮箱管理</h1>
         <span class="domain">@lshang.top</span>
       </div>
-      <button id="btnRefresh" class="btn-secondary">刷新</button>
+      <div class="top-actions">
+        <button id="btnHealthCheck" class="btn-secondary">系统检测</button>
+        <button id="btnRefresh" class="btn-secondary">刷新</button>
+      </div>
     </header>
 
     <section class="toolbar">
@@ -43,9 +46,18 @@
           </div>
           <div class="selected-actions">
             <button id="btnCopyAddress" class="btn-secondary" disabled>复制邮箱</button>
+            <button id="btnFetchMailbox" class="btn-secondary" disabled>抓取邮箱内容</button>
             <button id="btnEditInbox" class="btn-secondary" disabled>编辑备注</button>
             <button id="btnDeleteInbox" class="btn-danger" disabled>删除邮箱</button>
           </div>
+        </section>
+
+        <section class="diagnostic-section">
+          <div class="section-title">
+            <h2>检测结果</h2>
+            <button id="btnMailCaptureTest" class="btn-secondary">检测收信和抓取</button>
+          </div>
+          <div id="diagnosticResult" class="diagnostic-result">尚未检测</div>
         </section>
 
         <section class="account-section">
@@ -62,6 +74,10 @@
             <label>
               平台/网站
               <input type="text" id="accountPlatform" placeholder="例如 OpenAI、GitHub">
+            </label>
+            <label>
+              网站 URL
+              <input type="url" id="accountWebsiteUrl" placeholder="https://example.com">
             </label>
             <label>
               账号名
