@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
+const { simpleParser } = require("mailparser");
 
 const app = express();
 const PORT = process.env.PORT || 5454;
@@ -140,8 +141,26 @@ app.get("/register/api/stream/:name", (req, res) => {
   });
 });
 
-app.post("/register/webhook/mail", (req, res) => {
-  const { to, from, subject, text, html } = req.body;
+app.post("/register/webhook/mail", async (req, res) => {
+  const { raw } = req.body;
+
+  if (raw) {
+    try {
+      const parsed = await simpleParser(raw);
+      const addr = parsed.to?.value?.[0]?.address?.toLowerCase();
+      if (!addr || !parsed.from?.text) {
+        return res.status(400).json({ ok: false, error: "invalid email" });
+      }
+      storeMail(addr, parsed.from.text, parsed.subject || "(no subject)", parsed.text || "", parsed.html || "");
+    } catch (e) {
+      console.error("Mail parse error:", e.message);
+      return res.json({ ok: true });
+    }
+    saveMails();
+    return res.json({ ok: true });
+  }
+
+  const { to, from, subject, text, html: htmlBody } = req.body;
 
   if (!to || !from) {
     return res.status(400).json({ ok: false, error: "to and from required" });
@@ -157,27 +176,29 @@ app.post("/register/webhook/mail", (req, res) => {
 
   recipients.forEach((recipient) => {
     const addr = extractEmail(recipient);
-    if (!inboxes.has(addr)) {
-      inboxes.set(addr, []);
-    }
-
-    const mail = {
-      id: uuidv4(),
-      from: from || "",
-      to: addr,
-      subject: subject || "(no subject)",
-      time: new Date().toISOString(),
-      text: text || "",
-      html: html || "",
-    };
-
-    inboxes.get(addr).push(mail);
-    notifySSE(addr);
+    storeMail(addr, from, subject || "(no subject)", text || "", htmlBody || "");
   });
 
   saveMails();
   res.json({ ok: true });
 });
+
+function storeMail(addr, from, subject, text, html) {
+  if (!inboxes.has(addr)) {
+    inboxes.set(addr, []);
+  }
+  const mail = {
+    id: uuidv4(),
+    from,
+    to: addr,
+    subject,
+    time: new Date().toISOString(),
+    text,
+    html,
+  };
+  inboxes.get(addr).push(mail);
+  notifySSE(addr);
+}
 
 app.get("/register/api/inbox/:name/delete/:id", (req, res) => {
   const { name, id } = req.params;
