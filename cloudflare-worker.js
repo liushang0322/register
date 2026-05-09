@@ -11,7 +11,7 @@ export default {
       html: parsed.html,
     };
 
-    const target = env.WEBHOOK_URL || "http://lshang.top:5454/register/webhook/mail";
+    const target = env.WEBHOOK_URL || "http://lshang.top/register/webhook/mail";
 
     try {
       await fetch(target, {

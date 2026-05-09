@@ -5,7 +5,7 @@ services:
     image: nginx:alpine
     container_name: register-nginx
     ports:
-      - "5454:80"
+      - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
