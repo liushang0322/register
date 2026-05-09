@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: register-nginx
+    ports:
+      - "5454:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: register-app
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>临时邮箱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>临时邮箱</h1>
+    <span class="domain">@lshang.top</span>
+  </header>
+
+  <div class="toolbar">
+    <button id="btnCreate" class="btn-primary">生成新邮箱</button>
+  </div>
+
+  <div id="currentEmail" class="email-display hidden">
+    <span id="emailText"></span>
+    <button id="btnCopy" class="btn-copy">复制</button>
+  </div>
+
+  <div class="main-layout">
+    <aside id="sidebar" class="hidden">
+      <h3>收件箱</h3>
+      <div id="mailList"></div>
+    </aside>
+
+    <main id="mailDetail" class="hidden">
+      <div class="detail-header">
+        <h3 id="detailSubject"></h3>
+        <div class="detail-meta">
+          <span>发件人：</span><span id="detailFrom"></span>
+        </div>
+        <div class="detail-meta">
+          <span>时间：</span><span id="detailTime"></span>
+        </div>
+      </div>
+      <div class="detail-body">
+        <iframe id="detailFrame" sandbox="allow-same-origin"></iframe>
+      </div>
+      <button id="btnDelete" class="btn-delete">删除此邮件</button>
+    </main>
+  </div>
+
+  <div id="emptyHint" class="empty-hint">
+    点击上方按钮生成一个临时邮箱地址
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
