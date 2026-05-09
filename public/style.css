@@ -400,6 +400,23 @@ h2 {
   line-height: 1.5;
 }
 
+.signup-url-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #536173;
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+.signup-url-field input {
+  border: 1px solid #cfd7e2;
+  border-radius: 6px;
+  padding: 8px 10px;
+  outline: none;
+  background: #fff;
+}
+
 .registration-job-list {
   display: flex;
   flex-direction: column;

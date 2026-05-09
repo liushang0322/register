@@ -356,10 +356,11 @@ async function runMailCaptureTest() {
 
 async function createOpenAIJob(product) {
   try {
+    const websiteUrl = $("#openaiSignupUrl").value.trim();
     const data = await api("/api/register-jobs/openai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ product }),
+      body: JSON.stringify({ product, websiteUrl }),
     });
     await loadAll();
     await selectInbox(data.job.email);

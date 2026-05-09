@@ -9,6 +9,8 @@ const app = express();
 const PORT = process.env.PORT || 5454;
 const DOMAIN = process.env.DOMAIN || "lshang.top";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const OPENAI_CHATGPT_SIGNUP_URL = process.env.OPENAI_CHATGPT_SIGNUP_URL || "https://chatgpt.com/auth/login/";
+const OPENAI_API_SIGNUP_URL = process.env.OPENAI_API_SIGNUP_URL || "https://platform.openai.com/signup?source=standard";
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -253,7 +255,8 @@ app.get("/register/api/register-jobs", (req, res) => {
 
 app.post("/register/api/register-jobs/openai", (req, res) => {
   const product = req.body?.product === "api" ? "api" : "chatgpt";
-  const websiteUrl = product === "api" ? "https://platform.openai.com/signup" : "https://auth.openai.com/create-account";
+  const defaultUrl = product === "api" ? OPENAI_API_SIGNUP_URL : OPENAI_CHATGPT_SIGNUP_URL;
+  const websiteUrl = normalizeUrl(req.body?.websiteUrl) || defaultUrl;
   const email = extractEmail(req.body?.email) || createInbox();
   const password = String(req.body?.password || generatePassword(18));
   const now = new Date().toISOString();
