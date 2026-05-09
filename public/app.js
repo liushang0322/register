@@ -128,6 +128,8 @@ function renderAccountList() {
       <div>
         <span>账号：${esc(account.username || "-")}</span>
         <span>密码：${esc(account.password || "-")}</span>
+        <span>姓名：${esc(account.fullName || "-")}</span>
+        <span>年龄：${esc(account.age || "-")}</span>
       </div>
       <p>${esc(account.note || "")}</p>
       <div class="check-summary">
@@ -174,6 +176,8 @@ function renderRegistrationJobs() {
         <strong>${esc(job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT")}</strong>
         <span>${esc(job.email)}</span>
         <span>密码：${esc(job.password)}</span>
+        <span>姓名：${esc(job.fullName || "-")}</span>
+        <span>年龄：${esc(job.age || "-")}</span>
         <span>状态：${esc(statusText)}</span>
       </div>
       <div class="job-scan">
@@ -185,6 +189,7 @@ function renderRegistrationJobs() {
         <a class="btn-small link-btn" href="${esc(job.websiteUrl)}" target="_blank" rel="noopener">打开注册页</a>
         <button type="button" class="btn-small" data-action="copy-email">复制邮箱</button>
         <button type="button" class="btn-small" data-action="copy-password">复制密码</button>
+        <button type="button" class="btn-small" data-action="copy-name">复制姓名</button>
         <button type="button" class="btn-small" data-action="scan">扫描邮件</button>
         <button type="button" class="btn-small" data-action="complete">标记成功并保存</button>
         <button type="button" class="btn-small danger" data-action="delete">删除任务</button>
@@ -192,6 +197,7 @@ function renderRegistrationJobs() {
     `;
     item.querySelector('[data-action="copy-email"]').addEventListener("click", () => copyText(job.email, "邮箱已复制"));
     item.querySelector('[data-action="copy-password"]').addEventListener("click", () => copyText(job.password, "密码已复制"));
+    item.querySelector('[data-action="copy-name"]').addEventListener("click", () => copyText(job.fullName || "", "姓名已复制"));
     item.querySelector('[data-action="scan"]').addEventListener("click", () => scanRegistrationJob(job.id));
     item.querySelector('[data-action="complete"]').addEventListener("click", () => completeRegistrationJob(job.id));
     item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteRegistrationJob(job.id));
@@ -367,6 +373,8 @@ async function createOpenAIJob(product) {
     renderDiagnostic("OpenAI 注册任务", [
       { name: "email", ok: true, message: data.job.email },
       { name: "password", ok: true, message: data.job.password },
+      { name: "fullName", ok: true, message: data.job.fullName || "" },
+      { name: "age", ok: true, message: String(data.job.age || "") },
       { name: "registerUrl", ok: true, message: data.job.websiteUrl },
     ]);
     toast("OpenAI 注册任务已创建");
@@ -539,6 +547,8 @@ async function saveAccount(event) {
     websiteUrl: $("#accountWebsiteUrl").value,
     username: $("#accountUsername").value,
     password: $("#accountPassword").value,
+    fullName: $("#accountFullName").value,
+    age: $("#accountAge").value,
     note: $("#accountNote").value,
   };
   const url = id ? `/api/accounts/${encodeURIComponent(id)}` : "/api/accounts";
@@ -567,6 +577,8 @@ function editAccount(id) {
   $("#accountWebsiteUrl").value = account.websiteUrl || "";
   $("#accountUsername").value = account.username || "";
   $("#accountPassword").value = account.password || "";
+  $("#accountFullName").value = account.fullName || "";
+  $("#accountAge").value = account.age || "";
   $("#accountNote").value = account.note || "";
 }
 
@@ -588,6 +600,8 @@ function resetAccountForm() {
   $("#accountWebsiteUrl").value = "";
   $("#accountUsername").value = "";
   $("#accountPassword").value = "";
+  $("#accountFullName").value = "";
+  $("#accountAge").value = "";
   $("#accountNote").value = "";
 }
 

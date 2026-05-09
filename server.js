@@ -259,6 +259,8 @@ app.post("/register/api/register-jobs/openai", (req, res) => {
   const websiteUrl = normalizeUrl(req.body?.websiteUrl) || defaultUrl;
   const email = extractEmail(req.body?.email) || createInbox();
   const password = String(req.body?.password || generatePassword(18));
+  const fullName = String(req.body?.fullName || generateFullName()).trim();
+  const age = normalizeAge(req.body?.age) || generateAdultAge();
   const now = new Date().toISOString();
   const job = {
     id: uuidv4(),
@@ -266,6 +268,8 @@ app.post("/register/api/register-jobs/openai", (req, res) => {
     product,
     email,
     password,
+    fullName,
+    age,
     websiteUrl,
     status: "pending",
     note: String(req.body?.note || "OpenAI 半自动注册任务").trim(),
@@ -320,6 +324,8 @@ app.post("/register/api/register-jobs/:id/complete", (req, res) => {
       platform: job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT",
       username: job.email,
       password: job.password,
+      fullName: job.fullName || "",
+      age: normalizeAge(job.age) || "",
       websiteUrl: job.websiteUrl,
       note: req.body?.note || job.note || "OpenAI 注册完成",
       createdAt: now,
@@ -330,6 +336,8 @@ app.post("/register/api/register-jobs/:id/complete", (req, res) => {
     account.platform = job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT";
     account.username = job.email;
     account.password = job.password;
+    account.fullName = job.fullName || account.fullName || "";
+    account.age = normalizeAge(job.age) || account.age || "";
     account.websiteUrl = job.websiteUrl;
     account.note = req.body?.note || account.note || job.note;
     account.updatedAt = now;
@@ -541,12 +549,30 @@ function generatePassword(length) {
   return password;
 }
 
+function generateFullName() {
+  const firstNames = ["Alex", "Taylor", "Jordan", "Morgan", "Casey", "Riley", "Jamie", "Avery", "Cameron", "Drew", "Quinn", "Reese"];
+  const lastNames = ["Smith", "Johnson", "Brown", "Miller", "Wilson", "Davis", "Clark", "Lewis", "Walker", "Hall", "Young", "Allen"];
+  return `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`;
+}
+
+function generateAdultAge() {
+  return Math.floor(Math.random() * 23) + 21;
+}
+
+function normalizeAge(value) {
+  const age = parseInt(value, 10);
+  if (!Number.isFinite(age) || age < 13 || age > 120) return "";
+  return age;
+}
+
 function normalizeAccount(input) {
   return {
     email: extractEmail(input.email || input.address || ""),
     platform: String(input.platform || "").trim(),
     username: String(input.username || "").trim(),
     password: String(input.password || "").trim(),
+    fullName: String(input.fullName || "").trim(),
+    age: normalizeAge(input.age),
     websiteUrl: String(input.websiteUrl || "").trim(),
     note: String(input.note || "").trim(),
   };
