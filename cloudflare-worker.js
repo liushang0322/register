@@ -1,9 +1,19 @@
 export default {
   async email(message, env, ctx) {
     const raw = await new Response(message.raw).text();
-    const body = { raw };
+    const headers = {};
+    for (const [key, value] of message.headers) {
+      headers[key.toLowerCase()] = value;
+    }
 
-    const target = "http://lshang.top/register/webhook/mail";
+    const body = {
+      raw,
+      from: message.from,
+      to: message.to,
+      headers,
+    };
+
+    const target = env.WEBHOOK_URL || "https://lshang.top/register/webhook/mail";
 
     try {
       const resp = await fetch(target, {

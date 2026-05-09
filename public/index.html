@@ -1,64 +1,122 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>临时邮箱管理</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>临时邮箱管理</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app">
-  <header>
-    <h1>临时邮箱管理</h1>
-    <span class="domain">@lshang.top</span>
-  </header>
-
-  <div class="toolbar">
-    <button class="btn-primary" data-action="create">+ 生成 1 个</button>
-    <button class="btn-primary" data-action="create5">+ 生成 5 个</button>
-    <button class="btn-primary" data-action="create10">+ 生成 10 个</button>
-    <input type="number" id="batchCount" value="1" min="1" max="50" class="batch-input" placeholder="自定义">
-    <button class="btn-primary" data-action="createN">生成</button>
-  </div>
-
-  <div id="mainLayout" class="main-layout">
-    <aside id="sidebar">
-      <h3>邮箱列表 (<span id="inboxCount">0</span>)</h3>
-      <div id="inboxList"></div>
-    </aside>
-
-    <main id="mailPanel">
-      <div class="detail-header hidden" id="detailHeader">
-        <div class="detail-address" id="detailAddress"></div>
-        <h3 id="detailSubject"></h3>
-        <div class="detail-meta"><span>发件人：</span><span id="detailFrom"></span></div>
-        <div class="detail-meta"><span>时间：</span><span id="detailTime"></span></div>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <h1>临时邮箱管理</h1>
+        <span class="domain">@lshang.top</span>
       </div>
-      <div class="detail-body" id="detailBody">
-        <iframe id="detailFrame" sandbox="allow-same-origin"></iframe>
-      </div>
-      <button id="btnDeleteMail" class="btn-delete hidden">删除此邮件</button>
-    </main>
-  </div>
+      <button id="btnRefresh" class="btn-secondary">刷新</button>
+    </header>
 
-  <div id="emptyHint" class="empty-hint">
-    点击上方按钮批量生成临时邮箱地址
-  </div>
-</div>
+    <section class="toolbar">
+      <button class="btn-primary" data-create="1">生成 1 个</button>
+      <button class="btn-primary" data-create="5">生成 5 个</button>
+      <button class="btn-primary" data-create="10">生成 10 个</button>
+      <input type="number" id="batchCount" value="20" min="1" max="50" class="batch-input" aria-label="批量生成数量">
+      <button id="btnCreateBatch" class="btn-primary">批量生成</button>
+    </section>
 
-<div id="editModal" class="modal hidden">
-  <div class="modal-content">
-    <h3>编辑邮箱信息</h3>
-    <label>邮箱：<span id="editEmail"></span></label>
-    <label>备注/用途：<input type="text" id="editNote" placeholder="例如：注册OpenAI"></label>
-    <label>密码/账号：<input type="text" id="editPassword" placeholder="该邮箱注册时使用的密码"></label>
-    <div class="modal-actions">
-      <button id="btnSaveMeta" class="btn-primary">保存</button>
-      <button id="btnCancelEdit" class="btn-cancel">取消</button>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="panel-title">
+          <h2>邮箱列表</h2>
+          <span id="inboxCount">0</span>
+        </div>
+        <input id="inboxSearch" class="search-input" type="search" placeholder="搜索邮箱、备注、密码">
+        <div id="inboxList" class="inbox-list"></div>
+      </aside>
+
+      <main class="workspace">
+        <section id="selectedPanel" class="selected-panel">
+          <div>
+            <div class="label">当前邮箱</div>
+            <div id="selectedAddress" class="selected-address">请选择或生成邮箱</div>
+            <div id="selectedMeta" class="selected-meta"></div>
+          </div>
+          <div class="selected-actions">
+            <button id="btnCopyAddress" class="btn-secondary" disabled>复制邮箱</button>
+            <button id="btnEditInbox" class="btn-secondary" disabled>编辑备注</button>
+            <button id="btnDeleteInbox" class="btn-danger" disabled>删除邮箱</button>
+          </div>
+        </section>
+
+        <section class="account-section">
+          <div class="section-title">
+            <h2>注册账号管理</h2>
+            <button id="btnResetAccount" class="btn-secondary">新建记录</button>
+          </div>
+          <form id="accountForm" class="account-form">
+            <input type="hidden" id="accountId">
+            <label>
+              注册邮箱
+              <input type="email" id="accountEmail" placeholder="先选择邮箱，或手动填写邮箱">
+            </label>
+            <label>
+              平台/网站
+              <input type="text" id="accountPlatform" placeholder="例如 OpenAI、GitHub">
+            </label>
+            <label>
+              账号名
+              <input type="text" id="accountUsername" placeholder="登录账号或用户名">
+            </label>
+            <label>
+              密码
+              <input type="text" id="accountPassword" placeholder="注册时使用的密码">
+            </label>
+            <label class="wide">
+              备注
+              <input type="text" id="accountNote" placeholder="用途、状态、二次验证等">
+            </label>
+            <button class="btn-primary" type="submit">保存账号</button>
+          </form>
+          <div id="accountList" class="account-list"></div>
+        </section>
+
+        <section class="mail-section">
+          <div class="section-title">
+            <h2>邮箱内容</h2>
+            <span id="mailStatus">未选择邮箱</span>
+          </div>
+          <div class="mail-grid">
+            <div id="mailList" class="mail-list"></div>
+            <article class="mail-detail">
+              <div id="detailHeader" class="detail-header hidden">
+                <div class="detail-address" id="detailAddress"></div>
+                <h3 id="detailSubject"></h3>
+                <div class="detail-meta"><span>发件人：</span><span id="detailFrom"></span></div>
+                <div class="detail-meta"><span>时间：</span><span id="detailTime"></span></div>
+                <button id="btnDeleteMail" class="btn-danger">删除邮件</button>
+              </div>
+              <div id="detailEmpty" class="empty-state">选择一封邮件查看内容</div>
+              <iframe id="detailFrame" class="detail-frame hidden" sandbox="allow-same-origin"></iframe>
+            </article>
+          </div>
+        </section>
+      </main>
     </div>
   </div>
-</div>
 
-<script src="app.js"></script>
+  <div id="editModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>编辑邮箱信息</h3>
+      <div id="editEmail" class="modal-email"></div>
+      <label>备注/用途<input type="text" id="editNote" placeholder="例如：注册 OpenAI"></label>
+      <label>密码/账号<input type="text" id="editPassword" placeholder="该邮箱注册时使用的密码或账号"></label>
+      <div class="modal-actions">
+        <button id="btnSaveMeta" class="btn-primary">保存</button>
+        <button id="btnCancelEdit" class="btn-secondary">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

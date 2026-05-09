@@ -18,9 +18,11 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const MAILS_FILE = path.join(DATA_DIR, "mails.json");
 const META_FILE = path.join(DATA_DIR, "meta.json");
+const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 
 let inboxes = new Map();
 let inboxMeta = new Map();
+let accounts = new Map();
 let sseClients = new Map();
 
 function loadJSON(file) {
@@ -56,11 +58,20 @@ function loadData() {
       inboxMeta.set(key, { note: "", password: "", createdAt: mails[0]?.time || new Date().toISOString() });
     }
   }
+
+  const accountsData = loadJSON(ACCOUNTS_FILE);
+  const accountList = Array.isArray(accountsData) ? accountsData : Object.values(accountsData);
+  for (const account of accountList) {
+    if (account && account.id) {
+      accounts.set(account.id, account);
+    }
+  }
 }
 
 function saveAll() {
   saveJSON(MAILS_FILE, Object.fromEntries(inboxes));
   saveJSON(META_FILE, Object.fromEntries(inboxMeta));
+  saveJSON(ACCOUNTS_FILE, Array.from(accounts.values()));
 }
 
 loadData();
@@ -75,12 +86,6 @@ function notifySSE(address) {
   }
 }
 
-function notifyAllSSE() {
-  for (const [address] of sseClients) {
-    notifySSE(address);
-  }
-}
-
 app.use("/register", express.static(path.join(__dirname, "public")));
 
 app.get("/register", (req, res) => {
@@ -88,10 +93,7 @@ app.get("/register", (req, res) => {
 });
 
 app.post("/register/api/inbox/create", (req, res) => {
-  const prefix = uuidv4().slice(0, 8);
-  const address = `${prefix}@${DOMAIN}`;
-  inboxes.set(address, []);
-  inboxMeta.set(address, { note: "", password: "", createdAt: new Date().toISOString() });
+  const address = createInbox();
   saveAll();
   res.json({ ok: true, address });
 });
@@ -100,11 +102,7 @@ app.post("/register/api/inbox/create-batch", (req, res) => {
   const count = Math.min(Math.max(parseInt(req.body.count) || 1, 1), 50);
   const addresses = [];
   for (let i = 0; i < count; i++) {
-    const prefix = uuidv4().slice(0, 8);
-    const address = `${prefix}@${DOMAIN}`;
-    inboxes.set(address, []);
-    inboxMeta.set(address, { note: "", password: "", createdAt: new Date().toISOString() });
-    addresses.push(address);
+    addresses.push(createInbox());
   }
   saveAll();
   res.json({ ok: true, addresses });
@@ -143,12 +141,56 @@ app.delete("/register/api/inbox/:name", (req, res) => {
   const address = req.params.name;
   inboxes.delete(address);
   inboxMeta.delete(address);
+  for (const [id, account] of accounts) {
+    if (account.email === address) accounts.delete(id);
+  }
   saveAll();
   const clients = sseClients.get(address);
   if (clients) {
     for (const c of clients) c.end();
     sseClients.delete(address);
   }
+  res.json({ ok: true });
+});
+
+app.get("/register/api/accounts", (req, res) => {
+  const list = Array.from(accounts.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  res.json({ ok: true, list });
+});
+
+app.post("/register/api/accounts", (req, res) => {
+  const account = normalizeAccount(req.body);
+  if (!account.email) {
+    return res.status(400).json({ ok: false, error: "email is required" });
+  }
+  account.id = uuidv4();
+  account.createdAt = new Date().toISOString();
+  account.updatedAt = account.createdAt;
+  accounts.set(account.id, account);
+  saveAll();
+  res.json({ ok: true, account });
+});
+
+app.put("/register/api/accounts/:id", (req, res) => {
+  const account = accounts.get(req.params.id);
+  if (!account) {
+    return res.status(404).json({ ok: false, error: "account not found" });
+  }
+  const next = normalizeAccount({ ...account, ...req.body });
+  next.id = account.id;
+  next.createdAt = account.createdAt;
+  next.updatedAt = new Date().toISOString();
+  accounts.set(next.id, next);
+  saveAll();
+  res.json({ ok: true, account: next });
+});
+
+app.delete("/register/api/accounts/:id", (req, res) => {
+  if (!accounts.has(req.params.id)) {
+    return res.status(404).json({ ok: false, error: "account not found" });
+  }
+  accounts.delete(req.params.id);
+  saveAll();
   res.json({ ok: true });
 });
 
@@ -216,16 +258,19 @@ app.post("/register/webhook/mail", async (req, res) => {
   if (raw) {
     try {
       const parsed = await simpleParser(raw);
-      const addr = parsed.to?.value?.[0]?.address?.toLowerCase();
-      if (!addr || !parsed.from?.text) {
+      const recipients = collectRecipients(parsed, req.body);
+      const from = parsed.from?.text || req.body.from || getHeader(req.body.headers, "from") || "";
+      if (recipients.length === 0 || !from) {
         return res.status(400).json({ ok: false, error: "invalid email" });
       }
-      storeMail(addr, parsed.from.text, parsed.subject || "(no subject)", parsed.text || "", parsed.html || "");
+      for (const addr of recipients) {
+        storeMail(addr, from, parsed.subject || "(no subject)", parsed.text || "", parsed.html || "");
+      }
     } catch (e) {
       console.error("Mail parse error:", e.message);
       return res.json({ ok: true });
     }
-    saveJSON(MAILS_FILE, Object.fromEntries(inboxes));
+    saveAll();
     return res.json({ ok: true });
   }
 
@@ -233,21 +278,95 @@ app.post("/register/webhook/mail", async (req, res) => {
   if (!to || !from) {
     return res.status(400).json({ ok: false, error: "to and from required" });
   }
-  function extractEmail(str) {
-    const m = str.match(/<([^>]+@[^>]+)>/);
-    if (m) return m[1].trim().toLowerCase();
-    return str.trim().toLowerCase();
-  }
-  const recipients = typeof to === "string" ? to.split(/,\s*/) : [to];
+  const recipients = extractEmails(to);
   recipients.forEach((r) => {
     const addr = extractEmail(r);
     storeMail(addr, from, subject || "(no subject)", text || "", htmlBody || "");
   });
-  saveJSON(MAILS_FILE, Object.fromEntries(inboxes));
+  saveAll();
   res.json({ ok: true });
 });
 
+function createInbox() {
+  let address;
+  do {
+    const prefix = uuidv4().replace(/-/g, "").slice(0, 10);
+    address = `${prefix}@${DOMAIN}`.toLowerCase();
+  } while (inboxes.has(address));
+  inboxes.set(address, []);
+  inboxMeta.set(address, { note: "", password: "", createdAt: new Date().toISOString() });
+  return address;
+}
+
+function normalizeAccount(input) {
+  return {
+    email: extractEmail(input.email || input.address || ""),
+    platform: String(input.platform || "").trim(),
+    username: String(input.username || "").trim(),
+    password: String(input.password || "").trim(),
+    note: String(input.note || "").trim(),
+  };
+}
+
+function getHeader(headers, name) {
+  if (!headers) return "";
+  const lower = name.toLowerCase();
+  if (typeof headers.get === "function") return headers.get(lower) || headers.get(name) || "";
+  return headers[lower] || headers[name] || "";
+}
+
+function extractEmail(value) {
+  const emails = extractEmails(value);
+  return emails[0] || "";
+}
+
+function extractEmails(value) {
+  const result = [];
+  const add = (item) => {
+    if (!item) return;
+    if (Array.isArray(item)) {
+      item.forEach(add);
+      return;
+    }
+    if (typeof item === "object") {
+      if (item.address) add(item.address);
+      if (item.text) add(item.text);
+      if (item.value) add(item.value);
+      return;
+    }
+    const text = String(item);
+    const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+    matches.forEach((m) => result.push(m.trim().toLowerCase()));
+  };
+  add(value);
+  return Array.from(new Set(result));
+}
+
+function collectRecipients(parsed, body) {
+  const candidates = [
+    ...extractEmails(body.to),
+    ...extractEmails(parsed.to),
+    ...extractEmails(parsed.cc),
+    ...extractEmails(parsed.bcc),
+    ...extractEmails(getHeader(body.headers, "to")),
+    ...extractEmails(getHeader(body.headers, "delivered-to")),
+    ...extractEmails(getHeader(body.headers, "x-forwarded-to")),
+    ...extractEmails(getHeader(body.headers, "original-recipient")),
+  ];
+  if (parsed.headers && typeof parsed.headers.get === "function") {
+    candidates.push(...extractEmails(parsed.headers.get("delivered-to")));
+    candidates.push(...extractEmails(parsed.headers.get("x-forwarded-to")));
+    candidates.push(...extractEmails(parsed.headers.get("original-recipient")));
+  }
+  const unique = Array.from(new Set(candidates.map(extractEmail).filter(Boolean)));
+  const domain = `@${DOMAIN.toLowerCase()}`;
+  const localRecipients = unique.filter((addr) => addr.endsWith(domain));
+  return localRecipients.length > 0 ? localRecipients : unique;
+}
+
 function storeMail(addr, from, subject, text, html) {
+  addr = extractEmail(addr);
+  if (!addr) return;
   if (!inboxMeta.has(addr)) {
     inboxMeta.set(addr, { note: "", password: "", createdAt: new Date().toISOString() });
   }
@@ -264,17 +383,24 @@ function storeMail(addr, from, subject, text, html) {
   notifySSE(addr);
 }
 
+app.delete("/register/api/inbox/:name/mail/:id", (req, res) => {
+  deleteMail(req.params.name, req.params.id, res);
+});
+
 app.get("/register/api/inbox/:name/delete/:id", (req, res) => {
-  const { name, id } = req.params;
+  deleteMail(req.params.name, req.params.id, res);
+});
+
+function deleteMail(name, id, res) {
   const mails = inboxes.get(name);
   if (!mails) return res.json({ ok: false, error: "inbox not found" });
   const idx = mails.findIndex((m) => m.id === id);
   if (idx === -1) return res.json({ ok: false, error: "mail not found" });
   mails.splice(idx, 1);
-  saveJSON(MAILS_FILE, Object.fromEntries(inboxes));
+  saveAll();
   notifySSE(name);
   res.json({ ok: true });
-});
+}
 
 const server = http.createServer(app);
 server.listen(PORT, () => {
