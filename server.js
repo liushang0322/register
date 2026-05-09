@@ -257,9 +257,9 @@ app.post("/register/api/register-jobs/openai", (req, res) => {
   const product = req.body?.product === "api" ? "api" : "chatgpt";
   const defaultUrl = product === "api" ? OPENAI_API_SIGNUP_URL : OPENAI_CHATGPT_SIGNUP_URL;
   const websiteUrl = normalizeUrl(req.body?.websiteUrl) || defaultUrl;
-  const email = extractEmail(req.body?.email) || createInbox();
   const password = String(req.body?.password || generatePassword(18));
   const fullName = String(req.body?.fullName || generateFullName()).trim();
+  const email = extractEmail(req.body?.email) || createInbox({ fullName });
   const age = normalizeAge(req.body?.age) || generateAdultAge();
   const now = new Date().toISOString();
   const job = {
@@ -529,15 +529,34 @@ app.post("/register/webhook/mail", async (req, res) => {
   res.json({ ok: true });
 });
 
-function createInbox() {
+function createInbox(options = {}) {
   let address;
   do {
-    const prefix = uuidv4().replace(/-/g, "").slice(0, 10);
+    const prefix = generateEmailLocalPart(options.fullName);
     address = `${prefix}@${DOMAIN}`.toLowerCase();
   } while (inboxes.has(address));
   inboxes.set(address, []);
   inboxMeta.set(address, { note: "", password: "", createdAt: new Date().toISOString() });
   return address;
+}
+
+function generateEmailLocalPart(fullName) {
+  const name = String(fullName || generateFullName()).toLowerCase().replace(/[^a-z\s.-]/g, " ");
+  const parts = name.split(/[\s.-]+/).filter(Boolean);
+  const first = parts[0] || "user";
+  const last = parts[1] || "mail";
+  const year = Math.floor(Math.random() * 18) + 1982;
+  const short = Math.floor(Math.random() * 90) + 10;
+  const variants = [
+    `${first}.${last}`,
+    `${first}${last}`,
+    `${first}.${last}${short}`,
+    `${first}${last}${short}`,
+    `${first}.${last}.${String(year).slice(-2)}`,
+    `${first[0]}${last}${short}`,
+  ];
+  const base = variants[Math.floor(Math.random() * variants.length)];
+  return base.slice(0, 48);
 }
 
 function generatePassword(length) {
