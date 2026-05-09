@@ -253,7 +253,7 @@ app.get("/register/api/register-jobs", (req, res) => {
 
 app.post("/register/api/register-jobs/openai", (req, res) => {
   const product = req.body?.product === "api" ? "api" : "chatgpt";
-  const websiteUrl = product === "api" ? "https://platform.openai.com/" : "https://chatgpt.com/";
+  const websiteUrl = product === "api" ? "https://platform.openai.com/signup" : "https://chatgpt.com/auth/signup";
   const email = extractEmail(req.body?.email) || createInbox();
   const password = String(req.body?.password || generatePassword(18));
   const now = new Date().toISOString();
