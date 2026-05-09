@@ -11,14 +11,15 @@ export default {
       html: parsed.html,
     };
 
-    const target = env.WEBHOOK_URL || "http://lshang.top/register/webhook/mail";
+    const target = "http://lshang.top/register/webhook/mail";
 
     try {
-      await fetch(target, {
+      const resp = await fetch(target, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      console.log("Webhook response:", resp.status, await resp.text());
     } catch (e) {
       console.error("Webhook failed:", e.message);
     }
