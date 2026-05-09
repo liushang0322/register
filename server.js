@@ -147,10 +147,16 @@ app.post("/register/webhook/mail", (req, res) => {
     return res.status(400).json({ ok: false, error: "to and from required" });
   }
 
+  function extractEmail(str) {
+    const m = str.match(/<([^>]+@[^>]+)>/);
+    if (m) return m[1].trim().toLowerCase();
+    return str.trim().toLowerCase();
+  }
+
   const recipients = typeof to === "string" ? to.split(/,\s*/) : [to];
 
   recipients.forEach((recipient) => {
-    const addr = recipient.trim().toLowerCase();
+    const addr = extractEmail(recipient);
     if (!inboxes.has(addr)) {
       inboxes.set(addr, []);
     }
