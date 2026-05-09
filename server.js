@@ -19,10 +19,12 @@ if (!fs.existsSync(DATA_DIR)) {
 const MAILS_FILE = path.join(DATA_DIR, "mails.json");
 const META_FILE = path.join(DATA_DIR, "meta.json");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
+const REGISTRATION_JOBS_FILE = path.join(DATA_DIR, "registration-jobs.json");
 
 let inboxes = new Map();
 let inboxMeta = new Map();
 let accounts = new Map();
+let registrationJobs = new Map();
 let sseClients = new Map();
 
 function loadJSON(file) {
@@ -66,12 +68,21 @@ function loadData() {
       accounts.set(account.id, account);
     }
   }
+
+  const jobsData = loadJSON(REGISTRATION_JOBS_FILE);
+  const jobList = Array.isArray(jobsData) ? jobsData : Object.values(jobsData);
+  for (const job of jobList) {
+    if (job && job.id) {
+      registrationJobs.set(job.id, job);
+    }
+  }
 }
 
 function saveAll() {
   saveJSON(MAILS_FILE, Object.fromEntries(inboxes));
   saveJSON(META_FILE, Object.fromEntries(inboxMeta));
   saveJSON(ACCOUNTS_FILE, Array.from(accounts.values()));
+  saveJSON(REGISTRATION_JOBS_FILE, Array.from(registrationJobs.values()));
 }
 
 loadData();
@@ -109,6 +120,7 @@ app.get("/register/api/health", (req, res) => {
   checks.push({ name: "dataWrite", ok: writable, message: writable ? "writable" : "not writable" });
   checks.push({ name: "mailStore", ok: true, message: `${inboxes.size} inboxes` });
   checks.push({ name: "accountStore", ok: true, message: `${accounts.size} accounts` });
+  checks.push({ name: "registrationJobs", ok: true, message: `${registrationJobs.size} jobs` });
 
   res.json({
     ok: checks.every((item) => item.ok),
@@ -116,6 +128,7 @@ app.get("/register/api/health", (req, res) => {
     dataDir: DATA_DIR,
     inboxCount: inboxMeta.size,
     accountCount: accounts.size,
+    registrationJobCount: registrationJobs.size,
     checks,
     time: new Date().toISOString(),
   });
@@ -231,6 +244,109 @@ app.delete("/register/api/inbox/:name", (req, res) => {
 app.get("/register/api/accounts", (req, res) => {
   const list = Array.from(accounts.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
   res.json({ ok: true, list });
+});
+
+app.get("/register/api/register-jobs", (req, res) => {
+  const list = Array.from(registrationJobs.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  res.json({ ok: true, list });
+});
+
+app.post("/register/api/register-jobs/openai", (req, res) => {
+  const product = req.body?.product === "api" ? "api" : "chatgpt";
+  const websiteUrl = product === "api" ? "https://platform.openai.com/" : "https://chatgpt.com/";
+  const email = extractEmail(req.body?.email) || createInbox();
+  const password = String(req.body?.password || generatePassword(18));
+  const now = new Date().toISOString();
+  const job = {
+    id: uuidv4(),
+    platform: "OpenAI",
+    product,
+    email,
+    password,
+    websiteUrl,
+    status: "pending",
+    note: String(req.body?.note || "OpenAI 半自动注册任务").trim(),
+    createdAt: now,
+    updatedAt: now,
+    lastScan: null,
+    accountId: "",
+  };
+  if (!inboxMeta.has(email)) {
+    inboxes.set(email, inboxes.get(email) || []);
+    inboxMeta.set(email, { note: "OpenAI 注册邮箱", password, createdAt: now });
+  }
+  registrationJobs.set(job.id, job);
+  saveAll();
+  res.json({ ok: true, job });
+});
+
+app.put("/register/api/register-jobs/:id", (req, res) => {
+  const job = registrationJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
+  const allowed = ["status", "note", "websiteUrl", "password"];
+  for (const key of allowed) {
+    if (req.body && req.body[key] !== undefined) job[key] = String(req.body[key]).trim();
+  }
+  job.updatedAt = new Date().toISOString();
+  registrationJobs.set(job.id, job);
+  saveAll();
+  res.json({ ok: true, job });
+});
+
+app.post("/register/api/register-jobs/:id/scan", (req, res) => {
+  const job = registrationJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
+  const scan = scanOpenAIRegistrationMailbox(job.email);
+  job.lastScan = scan;
+  if (scan.openaiMailCount > 0 && job.status === "pending") job.status = "mail_received";
+  job.updatedAt = new Date().toISOString();
+  registrationJobs.set(job.id, job);
+  saveAll();
+  res.json({ ok: true, job, scan });
+});
+
+app.post("/register/api/register-jobs/:id/complete", (req, res) => {
+  const job = registrationJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
+  const now = new Date().toISOString();
+  let account = job.accountId ? accounts.get(job.accountId) : null;
+  if (!account) {
+    account = {
+      id: uuidv4(),
+      email: job.email,
+      platform: job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT",
+      username: job.email,
+      password: job.password,
+      websiteUrl: job.websiteUrl,
+      note: req.body?.note || job.note || "OpenAI 注册完成",
+      createdAt: now,
+      updatedAt: now,
+    };
+  } else {
+    account.email = job.email;
+    account.platform = job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT";
+    account.username = job.email;
+    account.password = job.password;
+    account.websiteUrl = job.websiteUrl;
+    account.note = req.body?.note || account.note || job.note;
+    account.updatedAt = now;
+  }
+  accounts.set(account.id, account);
+  job.accountId = account.id;
+  job.status = "completed";
+  job.updatedAt = now;
+  registrationJobs.set(job.id, job);
+  saveAll();
+  res.json({ ok: true, job, account });
+});
+
+app.delete("/register/api/register-jobs/:id", (req, res) => {
+  if (!registrationJobs.has(req.params.id)) {
+    return res.status(404).json({ ok: false, error: "registration job not found" });
+  }
+  registrationJobs.delete(req.params.id);
+  saveAll();
+  res.json({ ok: true });
 });
 
 app.post("/register/api/accounts", (req, res) => {
@@ -413,6 +529,15 @@ function createInbox() {
   return address;
 }
 
+function generatePassword(length) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return password;
+}
+
 function normalizeAccount(input) {
   return {
     email: extractEmail(input.email || input.address || ""),
@@ -542,6 +667,46 @@ function summarizeMailbox(address, limit) {
     latestAt: mails[0]?.time || "",
     latestCodes: Array.from(new Set(summaries.flatMap((mail) => mail.codes))).slice(0, 10),
     mails: summaries,
+  };
+}
+
+function extractLinksFromText(text) {
+  const source = String(text || "");
+  const matches = source.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+  return Array.from(new Set(matches.map((url) => url.replace(/[).,;]+$/, "")))).slice(0, 20);
+}
+
+function isOpenAIMail(mail) {
+  const haystack = `${mail.from || ""} ${mail.subject || ""} ${mail.text || ""} ${stripHtml(mail.html)}`.toLowerCase();
+  return haystack.includes("openai") || haystack.includes("chatgpt") || haystack.includes("auth0");
+}
+
+function scanOpenAIRegistrationMailbox(address) {
+  const mails = [...(inboxes.get(address) || [])].sort((a, b) => new Date(b.time) - new Date(a.time));
+  const openaiMails = mails.filter(isOpenAIMail).slice(0, 10).map((mail) => {
+    const plain = mail.text || stripHtml(mail.html);
+    const links = extractLinksFromText(`${plain} ${mail.html || ""}`).filter((url) => {
+      const lower = url.toLowerCase();
+      return lower.includes("openai.com") || lower.includes("chatgpt.com") || lower.includes("auth0.com");
+    });
+    return {
+      id: mail.id,
+      from: mail.from,
+      subject: mail.subject,
+      time: mail.time,
+      snippet: plain.replace(/\s+/g, " ").trim().slice(0, 260),
+      codes: extractCodesFromText(`${mail.subject || ""} ${plain}`),
+      links,
+    };
+  });
+  return {
+    email: address,
+    checkedAt: new Date().toISOString(),
+    mailCount: mails.length,
+    openaiMailCount: openaiMails.length,
+    latestCodes: Array.from(new Set(openaiMails.flatMap((mail) => mail.codes))).slice(0, 10),
+    verificationLinks: Array.from(new Set(openaiMails.flatMap((mail) => mail.links))).slice(0, 10),
+    mails: openaiMails,
   };
 }
 

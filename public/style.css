@@ -30,6 +30,7 @@ button {
 .toolbar,
 .selected-panel,
 .diagnostic-section,
+.registration-section,
 .account-section,
 .mail-section,
 .sidebar,
@@ -91,7 +92,8 @@ h2 {
 .btn-primary,
 .btn-secondary,
 .btn-danger,
-.btn-small {
+.btn-small,
+.link-btn {
   border-radius: 6px;
   border: 1px solid transparent;
   min-height: 34px;
@@ -132,6 +134,13 @@ h2 {
   background: #f7f9fb;
   border-color: #d8dee6;
   font-size: 12px;
+}
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  color: #243447;
+  text-decoration: none;
 }
 
 .btn-small.danger {
@@ -251,6 +260,7 @@ h2 {
 
 .selected-panel,
 .diagnostic-section,
+.registration-section,
 .account-section,
 .mail-section {
   padding: 14px;
@@ -270,8 +280,10 @@ h2 {
 }
 
 .selected-actions,
+.section-actions,
 .modal-actions,
-.row-actions {
+.row-actions,
+.job-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -379,6 +391,50 @@ h2 {
   color: #536173;
   font-size: 12px;
   word-break: break-word;
+}
+
+.helper-note {
+  color: #536173;
+  font-size: 13px;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.registration-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.registration-job {
+  display: grid;
+  grid-template-columns: minmax(250px, 1.1fr) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.registration-job strong,
+.registration-job span,
+.registration-job a {
+  display: block;
+  word-break: break-all;
+}
+
+.registration-job span,
+.registration-job a {
+  font-size: 12px;
+}
+
+.job-main strong {
+  margin-bottom: 4px;
+}
+
+.job-scan {
+  color: #536173;
 }
 
 .mail-grid {
@@ -528,7 +584,8 @@ h2 {
   .layout,
   .mail-grid,
   .account-form,
-  .account-item {
+  .account-item,
+  .registration-job {
     grid-template-columns: 1fr;
   }
 

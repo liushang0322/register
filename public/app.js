@@ -2,6 +2,7 @@ const BASE = "/register";
 
 let inboxes = [];
 let accounts = [];
+let registrationJobs = [];
 let currentAddress = "";
 let currentMailId = "";
 let currentMails = [];
@@ -35,7 +36,7 @@ async function api(url, options = {}) {
 }
 
 async function loadAll() {
-  await Promise.all([loadInboxes(), loadAccounts()]);
+  await Promise.all([loadInboxes(), loadAccounts(), loadRegistrationJobs()]);
 }
 
 async function loadInboxes() {
@@ -49,6 +50,12 @@ async function loadAccounts() {
   const data = await api("/api/accounts");
   accounts = data.list || [];
   renderAccountList();
+}
+
+async function loadRegistrationJobs() {
+  const data = await api("/api/register-jobs");
+  registrationJobs = data.list || [];
+  renderRegistrationJobs();
 }
 
 function renderInboxList() {
@@ -137,6 +144,57 @@ function renderAccountList() {
     item.querySelector('[data-action="check"]').addEventListener("click", () => checkAccount(account.id));
     item.querySelector('[data-action="edit"]').addEventListener("click", () => editAccount(account.id));
     item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteAccount(account.id));
+    container.appendChild(item);
+  });
+}
+
+function renderRegistrationJobs() {
+  const container = $("#registrationJobList");
+  container.innerHTML = "";
+
+  if (registrationJobs.length === 0) {
+    container.innerHTML = '<div class="empty-inline">暂无 OpenAI 注册任务</div>';
+    return;
+  }
+
+  registrationJobs.forEach((job) => {
+    const scan = job.lastScan;
+    const statusText = {
+      pending: "待注册",
+      mail_received: "已收到邮件",
+      completed: "已完成",
+      paused: "已暂停",
+    }[job.status] || job.status || "待注册";
+    const codes = scan?.latestCodes?.length ? scan.latestCodes.join(", ") : "未发现";
+    const links = scan?.verificationLinks || [];
+    const item = document.createElement("div");
+    item.className = "registration-job";
+    item.innerHTML = `
+      <div class="job-main">
+        <strong>${esc(job.product === "api" ? "OpenAI API" : "OpenAI ChatGPT")}</strong>
+        <span>${esc(job.email)}</span>
+        <span>密码：${esc(job.password)}</span>
+        <span>状态：${esc(statusText)}</span>
+      </div>
+      <div class="job-scan">
+        <span>OpenAI 邮件：${scan ? scan.openaiMailCount : 0} / 总邮件：${scan ? scan.mailCount : 0}</span>
+        <span>验证码：${esc(codes)}</span>
+        ${links.length ? `<a href="${esc(links[0])}" target="_blank" rel="noopener">打开验证链接</a>` : ""}
+      </div>
+      <div class="job-actions">
+        <a class="btn-small link-btn" href="${esc(job.websiteUrl)}" target="_blank" rel="noopener">打开注册页</a>
+        <button type="button" class="btn-small" data-action="copy-email">复制邮箱</button>
+        <button type="button" class="btn-small" data-action="copy-password">复制密码</button>
+        <button type="button" class="btn-small" data-action="scan">扫描邮件</button>
+        <button type="button" class="btn-small" data-action="complete">标记成功并保存</button>
+        <button type="button" class="btn-small danger" data-action="delete">删除任务</button>
+      </div>
+    `;
+    item.querySelector('[data-action="copy-email"]').addEventListener("click", () => copyText(job.email, "邮箱已复制"));
+    item.querySelector('[data-action="copy-password"]').addEventListener("click", () => copyText(job.password, "密码已复制"));
+    item.querySelector('[data-action="scan"]').addEventListener("click", () => scanRegistrationJob(job.id));
+    item.querySelector('[data-action="complete"]').addEventListener("click", () => completeRegistrationJob(job.id));
+    item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteRegistrationJob(job.id));
     container.appendChild(item);
   });
 }
@@ -293,6 +351,77 @@ async function runMailCaptureTest() {
     toast("收信和抓取检测完成");
   } catch (e) {
     renderDiagnostic("收信和抓取检测", [{ name: "mailCapture", ok: false, message: e.message }]);
+  }
+}
+
+async function createOpenAIJob(product) {
+  try {
+    const data = await api("/api/register-jobs/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product }),
+    });
+    await loadAll();
+    await selectInbox(data.job.email);
+    renderDiagnostic("OpenAI 注册任务", [
+      { name: "email", ok: true, message: data.job.email },
+      { name: "password", ok: true, message: data.job.password },
+      { name: "registerUrl", ok: true, message: data.job.websiteUrl },
+    ]);
+    toast("OpenAI 注册任务已创建");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function scanRegistrationJob(id) {
+  try {
+    const data = await api(`/api/register-jobs/${encodeURIComponent(id)}/scan`, { method: "POST" });
+    await loadRegistrationJobs();
+    await loadInboxes();
+    if (data.job.email) {
+      await selectInbox(data.job.email);
+    }
+    renderDiagnostic("OpenAI 邮件扫描", [
+      { name: "mailbox", ok: true, message: data.scan.email },
+      { name: "openaiMail", ok: data.scan.openaiMailCount > 0, message: `${data.scan.openaiMailCount} 封 OpenAI 相关邮件` },
+      { name: "codes", ok: data.scan.latestCodes.length > 0, message: data.scan.latestCodes.join(", ") || "未发现验证码" },
+      { name: "links", ok: data.scan.verificationLinks.length > 0, message: data.scan.verificationLinks[0] || "未发现验证链接" },
+    ]);
+    toast("OpenAI 邮件扫描完成");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function completeRegistrationJob(id) {
+  if (!confirm("确认你已经在 OpenAI 官方页面完成注册？确认后会保存到账号管理。")) return;
+  try {
+    const data = await api(`/api/register-jobs/${encodeURIComponent(id)}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "OpenAI 注册成功" }),
+    });
+    await loadAll();
+    renderDiagnostic("OpenAI 账号已保存", [
+      { name: "platform", ok: true, message: data.account.platform },
+      { name: "email", ok: true, message: data.account.email },
+      { name: "website", ok: true, message: data.account.websiteUrl },
+    ]);
+    toast("账号已保存到账号管理");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function deleteRegistrationJob(id) {
+  if (!confirm("确定删除这个注册任务？已保存的账号记录不会被删除。")) return;
+  try {
+    await api(`/api/register-jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await loadRegistrationJobs();
+    toast("注册任务已删除");
+  } catch (e) {
+    toast(e.message, "error");
   }
 }
 
@@ -482,6 +611,26 @@ function fmtTime(value) {
   }
 }
 
+async function copyText(value, message) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const input = document.createElement("textarea");
+      input.value = value;
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+    toast(message);
+  } catch (e) {
+    toast("复制失败，请手动复制", "error");
+  }
+}
+
 document.querySelectorAll("[data-create]").forEach((button) => {
   button.addEventListener("click", () => createInboxes(button.dataset.create));
 });
@@ -491,26 +640,12 @@ $("#btnRefresh").addEventListener("click", () => loadAll().catch((e) => toast(e.
 $("#btnHealthCheck").addEventListener("click", runHealthCheck);
 $("#btnMailCaptureTest").addEventListener("click", runMailCaptureTest);
 $("#btnFetchMailbox").addEventListener("click", fetchCurrentMailbox);
+$("#btnCreateOpenAIChatGPT").addEventListener("click", () => createOpenAIJob("chatgpt"));
+$("#btnCreateOpenAIAPI").addEventListener("click", () => createOpenAIJob("api"));
 $("#inboxSearch").addEventListener("input", renderInboxList);
 $("#btnCopyAddress").addEventListener("click", async () => {
   if (!currentAddress) return;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(currentAddress);
-    } else {
-      const input = document.createElement("textarea");
-      input.value = currentAddress;
-      input.style.position = "fixed";
-      input.style.opacity = "0";
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand("copy");
-      input.remove();
-    }
-    toast("邮箱已复制");
-  } catch (e) {
-    toast("复制失败，请手动复制", "error");
-  }
+  copyText(currentAddress, "邮箱已复制");
 });
 $("#btnEditInbox").addEventListener("click", openEditModal);
 $("#btnDeleteInbox").addEventListener("click", deleteCurrentInbox);
