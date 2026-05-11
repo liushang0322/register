@@ -13,7 +13,7 @@ export default {
       headers,
     };
 
-    const target = env.WEBHOOK_URL || "http://lshang.top/register/webhook/mail";
+    const target = env.WEBHOOK_URL || "http://register.lshang.top/webhook/mail";
 
     try {
       const resp = await fetch(target, {

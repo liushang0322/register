@@ -99,13 +99,13 @@ function notifySSE(address) {
   }
 }
 
-app.use("/register", express.static(path.join(__dirname, "public")));
+app.use("/", express.static(path.join(__dirname, "public")));
 
-app.get("/register", (req, res) => {
+app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.get("/register/api/health", (req, res) => {
+app.get("/api/health", (req, res) => {
   const checks = [];
   let writable = false;
   try {
@@ -136,7 +136,7 @@ app.get("/register/api/health", (req, res) => {
   });
 });
 
-app.post("/register/api/diagnostics/mail-capture", async (req, res) => {
+app.post("/api/diagnostics/mail-capture", async (req, res) => {
   const address = extractEmail(req.body?.address) || `selftest-${Date.now()}@${DOMAIN}`.toLowerCase();
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const before = (inboxes.get(address) || []).length;
@@ -182,13 +182,13 @@ app.post("/register/api/diagnostics/mail-capture", async (req, res) => {
   });
 });
 
-app.post("/register/api/inbox/create", (req, res) => {
+app.post("/api/inbox/create", (req, res) => {
   const address = createInbox();
   saveAll();
   res.json({ ok: true, address });
 });
 
-app.post("/register/api/inbox/create-batch", (req, res) => {
+app.post("/api/inbox/create-batch", (req, res) => {
   const count = Math.min(Math.max(parseInt(req.body.count) || 1, 1), 50);
   const addresses = [];
   for (let i = 0; i < count; i++) {
@@ -198,7 +198,7 @@ app.post("/register/api/inbox/create-batch", (req, res) => {
   res.json({ ok: true, addresses });
 });
 
-app.get("/register/api/inbox", (req, res) => {
+app.get("/api/inbox", (req, res) => {
   const list = [];
   for (const [address, meta] of inboxMeta) {
     const mails = inboxes.get(address) || [];
@@ -214,7 +214,7 @@ app.get("/register/api/inbox", (req, res) => {
   res.json({ ok: true, list });
 });
 
-app.put("/register/api/inbox/:name/meta", (req, res) => {
+app.put("/api/inbox/:name/meta", (req, res) => {
   const address = req.params.name;
   if (!inboxMeta.has(address)) {
     return res.json({ ok: false, error: "inbox not found" });
@@ -227,7 +227,7 @@ app.put("/register/api/inbox/:name/meta", (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/register/api/inbox/:name", (req, res) => {
+app.delete("/api/inbox/:name", (req, res) => {
   const address = req.params.name;
   inboxes.delete(address);
   inboxMeta.delete(address);
@@ -243,17 +243,17 @@ app.delete("/register/api/inbox/:name", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/register/api/accounts", (req, res) => {
+app.get("/api/accounts", (req, res) => {
   const list = Array.from(accounts.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
   res.json({ ok: true, list });
 });
 
-app.get("/register/api/register-jobs", (req, res) => {
+app.get("/api/register-jobs", (req, res) => {
   const list = Array.from(registrationJobs.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
   res.json({ ok: true, list });
 });
 
-app.post("/register/api/register-jobs/openai", (req, res) => {
+app.post("/api/register-jobs/openai", (req, res) => {
   const product = req.body?.product === "api" ? "api" : "chatgpt";
   const defaultUrl = product === "api" ? OPENAI_API_SIGNUP_URL : OPENAI_CHATGPT_SIGNUP_URL;
   const websiteUrl = normalizeUrl(req.body?.websiteUrl) || defaultUrl;
@@ -287,7 +287,7 @@ app.post("/register/api/register-jobs/openai", (req, res) => {
   res.json({ ok: true, job });
 });
 
-app.put("/register/api/register-jobs/:id", (req, res) => {
+app.put("/api/register-jobs/:id", (req, res) => {
   const job = registrationJobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
   const allowed = ["status", "note", "websiteUrl", "password"];
@@ -300,7 +300,7 @@ app.put("/register/api/register-jobs/:id", (req, res) => {
   res.json({ ok: true, job });
 });
 
-app.post("/register/api/register-jobs/:id/scan", (req, res) => {
+app.post("/api/register-jobs/:id/scan", (req, res) => {
   const job = registrationJobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
   const scan = scanOpenAIRegistrationMailbox(job.email);
@@ -312,7 +312,7 @@ app.post("/register/api/register-jobs/:id/scan", (req, res) => {
   res.json({ ok: true, job, scan });
 });
 
-app.post("/register/api/register-jobs/:id/complete", (req, res) => {
+app.post("/api/register-jobs/:id/complete", (req, res) => {
   const job = registrationJobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
   const now = new Date().toISOString();
@@ -351,7 +351,7 @@ app.post("/register/api/register-jobs/:id/complete", (req, res) => {
   res.json({ ok: true, job, account });
 });
 
-app.delete("/register/api/register-jobs/:id", (req, res) => {
+app.delete("/api/register-jobs/:id", (req, res) => {
   if (!registrationJobs.has(req.params.id)) {
     return res.status(404).json({ ok: false, error: "registration job not found" });
   }
@@ -360,7 +360,7 @@ app.delete("/register/api/register-jobs/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/register/api/accounts", (req, res) => {
+app.post("/api/accounts", (req, res) => {
   const account = normalizeAccount(req.body || {});
   if (!account.email) {
     return res.status(400).json({ ok: false, error: "email is required" });
@@ -373,7 +373,7 @@ app.post("/register/api/accounts", (req, res) => {
   res.json({ ok: true, account });
 });
 
-app.put("/register/api/accounts/:id", (req, res) => {
+app.put("/api/accounts/:id", (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) {
     return res.status(404).json({ ok: false, error: "account not found" });
@@ -387,7 +387,7 @@ app.put("/register/api/accounts/:id", (req, res) => {
   res.json({ ok: true, account: next });
 });
 
-app.post("/register/api/accounts/:id/check", async (req, res) => {
+app.post("/api/accounts/:id/check", async (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) {
     return res.status(404).json({ ok: false, error: "account not found" });
@@ -419,7 +419,7 @@ app.post("/register/api/accounts/:id/check", async (req, res) => {
   res.json({ ok: true, account, result, mails: mailSnapshot.mails });
 });
 
-app.delete("/register/api/accounts/:id", (req, res) => {
+app.delete("/api/accounts/:id", (req, res) => {
   if (!accounts.has(req.params.id)) {
     return res.status(404).json({ ok: false, error: "account not found" });
   }
@@ -428,7 +428,7 @@ app.delete("/register/api/accounts/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/register/api/inbox/:name", (req, res) => {
+app.get("/api/inbox/:name", (req, res) => {
   const address = req.params.name;
   const mails = inboxes.get(address) || [];
   const list = mails.map((m) => ({
@@ -445,7 +445,7 @@ app.get("/register/api/inbox/:name", (req, res) => {
   });
 });
 
-app.get("/register/api/inbox/:name/mail-content", (req, res) => {
+app.get("/api/inbox/:name/mail-content", (req, res) => {
   const address = extractEmail(req.params.name);
   if (!address || !inboxes.has(address)) {
     return res.status(404).json({ ok: false, error: "inbox not found" });
@@ -453,7 +453,7 @@ app.get("/register/api/inbox/:name/mail-content", (req, res) => {
   res.json({ ok: true, mailbox: summarizeMailbox(address, parseInt(req.query.limit, 10) || 20) });
 });
 
-app.get("/register/api/inbox/:name/:id", (req, res) => {
+app.get("/api/inbox/:name/:id", (req, res) => {
   const { name, id } = req.params;
   const mails = inboxes.get(name);
   if (!mails) return res.json({ ok: false, error: "inbox not found" });
@@ -473,7 +473,7 @@ app.get("/register/api/inbox/:name/:id", (req, res) => {
   });
 });
 
-app.get("/register/api/stream/:name", (req, res) => {
+app.get("/api/stream/:name", (req, res) => {
   const address = req.params.name;
   if (!address) return res.status(400).end();
   res.writeHead(200, {
@@ -495,7 +495,7 @@ app.get("/register/api/stream/:name", (req, res) => {
   });
 });
 
-app.post("/register/webhook/mail", async (req, res) => {
+app.post("/webhook/mail", async (req, res) => {
   const { raw } = req.body;
   if (raw) {
     try {
@@ -799,11 +799,11 @@ async function checkWebsite(url) {
   }
 }
 
-app.delete("/register/api/inbox/:name/mail/:id", (req, res) => {
+app.delete("/api/inbox/:name/mail/:id", (req, res) => {
   deleteMail(req.params.name, req.params.id, res);
 });
 
-app.get("/register/api/inbox/:name/delete/:id", (req, res) => {
+app.get("/api/inbox/:name/delete/:id", (req, res) => {
   deleteMail(req.params.name, req.params.id, res);
 });
 

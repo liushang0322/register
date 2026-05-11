@@ -1,4 +1,4 @@
-const BASE = "/register";
+const BASE = "";
 
 let inboxes = [];
 let accounts = [];
