@@ -8,6 +8,7 @@ const { simpleParser } = require("mailparser");
 const app = express();
 const PORT = process.env.PORT || 5454;
 const DOMAIN = process.env.DOMAIN || "lshang.top";
+const LUBAN_API_KEY = process.env.LUBAN_API_KEY || "";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const OPENAI_CHATGPT_SIGNUP_URL = process.env.OPENAI_CHATGPT_SIGNUP_URL || "https://chatgpt.com/auth/login/";
 const OPENAI_API_SIGNUP_URL = process.env.OPENAI_API_SIGNUP_URL || "https://platform.openai.com/signup?source=standard";
@@ -22,11 +23,13 @@ const MAILS_FILE = path.join(DATA_DIR, "mails.json");
 const META_FILE = path.join(DATA_DIR, "meta.json");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 const REGISTRATION_JOBS_FILE = path.join(DATA_DIR, "registration-jobs.json");
+const SMS_JOBS_FILE = path.join(DATA_DIR, "sms-jobs.json");
 
 let inboxes = new Map();
 let inboxMeta = new Map();
 let accounts = new Map();
 let registrationJobs = new Map();
+let smsJobs = new Map();
 let sseClients = new Map();
 
 function loadJSON(file) {
@@ -78,6 +81,14 @@ function loadData() {
       registrationJobs.set(job.id, job);
     }
   }
+
+  const smsData = loadJSON(SMS_JOBS_FILE);
+  const smsList = Array.isArray(smsData) ? smsData : Object.values(smsData);
+  for (const item of smsList) {
+    if (item && item.requestId) {
+      smsJobs.set(item.requestId, item);
+    }
+  }
 }
 
 function saveAll() {
@@ -85,6 +96,7 @@ function saveAll() {
   saveJSON(META_FILE, Object.fromEntries(inboxMeta));
   saveJSON(ACCOUNTS_FILE, Array.from(accounts.values()));
   saveJSON(REGISTRATION_JOBS_FILE, Array.from(registrationJobs.values()));
+  saveJSON(SMS_JOBS_FILE, Array.from(smsJobs.values()));
 }
 
 loadData();
@@ -817,6 +829,130 @@ function deleteMail(name, id, res) {
   notifySSE(name);
   res.json({ ok: true });
 }
+
+async function lubanAPI(path, params) {
+  if (!LUBAN_API_KEY) throw new Error("LUBAN_API_KEY not configured");
+  const url = new URL(`https://lubansms.com/v2/api/${path}`);
+  url.searchParams.set("apikey", LUBAN_API_KEY);
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const r = await fetch(url.toString(), { signal: AbortSignal.timeout(15000) });
+  return r.json();
+}
+
+app.get("/api/sms/balance", async (req, res) => {
+  try {
+    const data = await lubanAPI("getBalance");
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.get("/api/sms/countries", async (req, res) => {
+  try {
+    const data = await lubanAPI("countries");
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.get("/api/sms/services", async (req, res) => {
+  try {
+    const data = await lubanAPI("List", {
+      country: req.query.country,
+      service: req.query.service,
+      language: req.query.language || "zh",
+      page: req.query.page || 1,
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.post("/api/sms/request-number", async (req, res) => {
+  try {
+    const { serviceId } = req.body;
+    if (!serviceId) return res.status(400).json({ code: 400, msg: "serviceId required" });
+    const data = await lubanAPI("getNumber", { service_id: serviceId });
+    if (data.code === 0 && data.request_id) {
+      smsJobs.set(data.request_id, {
+        requestId: data.request_id,
+        number: data.number,
+        serviceId,
+        status: "waiting",
+        smsCode: "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      saveAll();
+    }
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.get("/api/sms/check/:requestId", async (req, res) => {
+  try {
+    const data = await lubanAPI("getSms", { request_id: req.params.requestId });
+    const job = smsJobs.get(req.params.requestId);
+    if (data.code === 0 && data.msg === "success" && job) {
+      job.smsCode = data.sms_code || "";
+      job.smsMsg = data.msg;
+      job.status = "received";
+      job.updatedAt = new Date().toISOString();
+      smsJobs.set(job.requestId, job);
+      saveAll();
+    } else if (data.code === 400 && data.msg === "wrong_status" && job) {
+      job.status = "expired";
+      job.updatedAt = new Date().toISOString();
+      smsJobs.set(job.requestId, job);
+      saveAll();
+    }
+    if (job) {
+      res.json({ ...data, job });
+    } else {
+      res.json(data);
+    }
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.post("/api/sms/release", async (req, res) => {
+  try {
+    const { requestId } = req.body;
+    if (!requestId) return res.status(400).json({ code: 400, msg: "requestId required" });
+    const data = await lubanAPI("setStatus", { request_id: requestId, status: "reject" });
+    const job = smsJobs.get(requestId);
+    if (job) {
+      job.status = "released";
+      job.updatedAt = new Date().toISOString();
+      smsJobs.set(job.requestId, job);
+      saveAll();
+    }
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: e.message });
+  }
+});
+
+app.get("/api/sms/history", (req, res) => {
+  const list = Array.from(smsJobs.values())
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 100);
+  res.json({ code: 0, list });
+});
+
+app.get("/api/sms/jobs", (req, res) => {
+  const list = Array.from(smsJobs.values())
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ code: 0, list });
+});
 
 const server = http.createServer(app);
 server.listen(PORT, () => {

@@ -17,4 +17,6 @@ services:
     container_name: register-app
     volumes:
       - ./data:/app/data
+    environment:
+      - LUBAN_API_KEY=${LUBAN_API_KEY}
     restart: unless-stopped

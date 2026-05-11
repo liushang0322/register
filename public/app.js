@@ -646,6 +646,169 @@ async function copyText(value, message) {
   }
 }
 
+let activeSmsJob = null;
+let smsCheckTimer = null;
+
+async function loadSmsBalance() {
+  try {
+    const data = await api("/api/sms/balance");
+    if (data.code === 0 && data.balance !== undefined) {
+      $("#smsBalance").textContent = `余额：${data.balance} 元`;
+    }
+  } catch (e) {
+    $("#smsBalance").textContent = "余额：获取失败";
+  }
+}
+
+async function searchSmsServices() {
+  const country = $("#smsCountry").value.trim();
+  const service = $("#smsService").value.trim();
+  const language = $("#smsLanguage").value;
+  if (!country && !service) return toast("请填写国家或服务名", "error");
+  try {
+    const data = await api(`/api/sms/services?country=${encodeURIComponent(country)}&service=${encodeURIComponent(service)}&language=${language}&page=1`);
+    const services = data.msg || [];
+    const container = $("#smsServiceList");
+    container.innerHTML = "";
+    if (services.length === 0) {
+      container.innerHTML = '<div class="empty-inline">未找到服务，尝试修改搜索词</div>';
+      return;
+    }
+    services.forEach((svc) => {
+      const item = document.createElement("div");
+      item.className = "sms-service-item";
+      item.innerHTML = `
+        <span class="svc-name">${esc(svc.service_name)} (${esc(svc.country_name_zh || svc.country_name_en)})</span>
+        <span class="svc-info">ID: ${esc(svc.service_id)} | ${esc(svc.provider)} | ￥${esc(svc.cost)}</span>
+      `;
+      item.addEventListener("click", () => requestSmsNumber(svc.service_id, svc.service_name));
+      container.appendChild(item);
+    });
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function requestSmsNumber(serviceId, serviceName) {
+  try {
+    const data = await api("/api/sms/request-number", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serviceId }),
+    });
+    if (data.code === 0 && data.number) {
+      activeSmsJob = { requestId: data.request_id, number: data.number, serviceId, serviceName };
+      renderActiveSmsJob();
+      startSmsPolling();
+      toast(`获取号码：${data.number}`);
+      loadSmsHistory();
+    } else {
+      toast(data.msg || "获取号码失败", "error");
+    }
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+function renderActiveSmsJob() {
+  if (!activeSmsJob) {
+    $("#smsActiveJob").classList.add("hidden");
+    return;
+  }
+  $("#smsActiveJob").classList.remove("hidden");
+  $("#smsActiveNumber").textContent = activeSmsJob.number;
+  $("#smsActiveCode").textContent = activeSmsJob.smsCode || "等待中...";
+  if (activeSmsJob.smsCode) {
+    $("#btnSmsCopyCode").classList.remove("hidden");
+  } else {
+    $("#btnSmsCopyCode").classList.add("hidden");
+  }
+}
+
+function startSmsPolling() {
+  stopSmsPolling();
+  smsCheckTimer = setInterval(checkSmsCode, 5000);
+  checkSmsCode();
+}
+
+function stopSmsPolling() {
+  if (smsCheckTimer) {
+    clearInterval(smsCheckTimer);
+    smsCheckTimer = null;
+  }
+}
+
+async function checkSmsCode() {
+  if (!activeSmsJob) return;
+  try {
+    const data = await api(`/api/sms/check/${encodeURIComponent(activeSmsJob.requestId)}`);
+    if (data.code === 0 && data.msg === "success") {
+      activeSmsJob.smsCode = data.sms_code || data.job?.smsCode;
+      renderActiveSmsJob();
+      stopSmsPolling();
+      loadSmsHistory();
+      toast(`收到验证码：${activeSmsJob.smsCode}`);
+    } else if (data.code === 400 && data.msg === "wrong_status") {
+      activeSmsJob.smsCode = "";
+      activeSmsJob.status = "expired";
+      renderActiveSmsJob();
+      stopSmsPolling();
+      loadSmsHistory();
+      toast("号码超时未收到短信", "error");
+    }
+  } catch (e) {
+    // ignore polling errors
+  }
+}
+
+async function releaseSmsNumber() {
+  if (!activeSmsJob) return;
+  if (!confirm("确认释放号码？")) return;
+  try {
+    await api("/api/sms/release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: activeSmsJob.requestId }),
+    });
+    stopSmsPolling();
+    activeSmsJob = null;
+    renderActiveSmsJob();
+    loadSmsHistory();
+    toast("号码已释放");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function loadSmsHistory() {
+  try {
+    const data = await api("/api/sms/jobs");
+    const list = data.list || [];
+    const container = $("#smsHistoryList");
+    container.innerHTML = "";
+    if (list.length === 0) {
+      container.innerHTML = '<div class="empty-inline">暂无记录</div>';
+      return;
+    }
+    list.forEach((job) => {
+      const statusLabel = { waiting: "等待中", received: "已收到", released: "已释放", expired: "已过期" }[job.status] || job.status;
+      const item = document.createElement("div");
+      item.className = "sms-history-item";
+      const codeLine = job.smsCode ? `<span class="sms-his-code">验证码：${esc(job.smsCode)}</span>` : "";
+      item.innerHTML = `
+        <span class="sms-his-number">${esc(job.number)}</span>
+        <span>服务ID：${esc(job.serviceId)}</span>
+        ${codeLine}
+        <span>${fmtTime(job.createdAt)}</span>
+        <span class="sms-status ${esc(job.status)}">${esc(statusLabel)}</span>
+      `;
+      container.appendChild(item);
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
 document.querySelectorAll("[data-create]").forEach((button) => {
   button.addEventListener("click", () => createInboxes(button.dataset.create));
 });
@@ -669,7 +832,17 @@ $("#btnCancelEdit").addEventListener("click", () => hide($("#editModal")));
 $("#btnDeleteMail").addEventListener("click", deleteCurrentMail);
 $("#accountForm").addEventListener("submit", saveAccount);
 $("#btnResetAccount").addEventListener("click", resetAccountForm);
+$("#btnSmsSearch").addEventListener("click", searchSmsServices);
+$("#btnSmsCheck").addEventListener("click", checkSmsCode);
+$("#btnSmsRelease").addEventListener("click", releaseSmsNumber);
+$("#btnSmsCopyNumber").addEventListener("click", () => {
+  if (activeSmsJob) copyText(activeSmsJob.number, "号码已复制");
+});
+$("#btnSmsCopyCode").addEventListener("click", () => {
+  if (activeSmsJob?.smsCode) copyText(activeSmsJob.smsCode, "验证码已复制");
+});
+$("#btnSmsRefreshHistory").addEventListener("click", loadSmsHistory);
 
 loadAll()
-  .then(() => renderMailList([]))
+  .then(() => { renderMailList([]); loadSmsBalance(); loadSmsHistory(); })
   .catch((e) => toast(e.message, "error"));

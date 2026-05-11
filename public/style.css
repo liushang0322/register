@@ -620,3 +620,154 @@ h2 {
     grid-column: auto;
   }
 }
+
+.sms-section {
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #d8dee6;
+  border-radius: 8px;
+}
+
+.sms-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.sms-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #536173;
+  font-size: 12px;
+}
+
+.sms-controls label input {
+  border: 1px solid #cfd7e2;
+  border-radius: 6px;
+  padding: 7px 10px;
+  outline: none;
+  background: #fff;
+  min-width: 130px;
+}
+
+.sms-select {
+  border: 1px solid #cfd7e2;
+  border-radius: 6px;
+  padding: 7px 10px;
+  outline: none;
+  background: #fff;
+  min-height: 34px;
+}
+
+.sms-service-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  margin: 8px 0 12px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.sms-service-item {
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.sms-service-item:hover {
+  border-color: #1769aa;
+  background: #eef7ff;
+}
+
+.sms-service-item .svc-name {
+  font-weight: 700;
+  display: block;
+}
+
+.sms-service-item .svc-info {
+  color: #65758b;
+  margin-top: 2px;
+}
+
+.sms-active-job {
+  border: 2px solid #1769aa;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 10px 0;
+  background: #eef7ff;
+}
+
+.sms-number-line,
+.sms-code-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sms-number-line strong {
+  font-size: 20px;
+  color: #1769aa;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.sms-code-line strong {
+  font-size: 24px;
+  color: #0d7c3d;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.sms-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sms-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.sms-history-item {
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.sms-history-item span {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.sms-history-item .sms-his-number {
+  font-weight: 700;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.sms-history-item .sms-his-code {
+  color: #0d7c3d;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.sms-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.sms-status.waiting { background: #fff3cd; color: #856404; }
+.sms-status.received { background: #d4edda; color: #155724; }
+.sms-status.released { background: #e2e3e5; color: #383d41; }
+.sms-status.expired { background: #f8d7da; color: #721c24; }
