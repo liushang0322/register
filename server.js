@@ -273,6 +273,7 @@ app.post("/api/register-jobs/openai", (req, res) => {
   const fullName = String(req.body?.fullName || generateFullName()).trim();
   const email = extractEmail(req.body?.email) || createInbox({ fullName });
   const age = normalizeAge(req.body?.age) || generateAdultAge();
+  const birthDate = req.body?.birthDate || generateBirthDate(age).text;
   const now = new Date().toISOString();
   const job = {
     id: uuidv4(),
@@ -282,6 +283,7 @@ app.post("/api/register-jobs/openai", (req, res) => {
     password,
     fullName,
     age,
+    birthDate,
     websiteUrl,
     status: "pending",
     note: String(req.body?.note || "OpenAI 半自动注册任务").trim(),
@@ -289,6 +291,10 @@ app.post("/api/register-jobs/openai", (req, res) => {
     updatedAt: now,
     lastScan: null,
     accountId: "",
+    smsPhone: "",
+    smsRequestId: "",
+    smsCode: "",
+    smsStatus: "",
   };
   if (!inboxMeta.has(email)) {
     inboxes.set(email, inboxes.get(email) || []);
@@ -324,6 +330,67 @@ app.post("/api/register-jobs/:id/scan", (req, res) => {
   res.json({ ok: true, job, scan });
 });
 
+app.post("/api/register-jobs/:id/request-sms", async (req, res) => {
+  const job = registrationJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
+  const { smsServiceId } = req.body;
+  if (!smsServiceId) return res.status(400).json({ ok: false, error: "smsServiceId required" });
+  try {
+    const data = await lubanAPI("getNumber", { service_id: smsServiceId });
+    if (data.code === 0 && data.number) {
+      job.smsPhone = data.number;
+      job.smsRequestId = String(data.request_id);
+      job.smsCode = "";
+      job.smsStatus = "waiting";
+      job.updatedAt = new Date().toISOString();
+      smsJobs.set(job.smsRequestId, {
+        requestId: job.smsRequestId,
+        number: job.smsPhone,
+        serviceId: smsServiceId,
+        status: "waiting",
+        smsCode: "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      registrationJobs.set(job.id, job);
+      saveAll();
+    }
+    res.json({ ok: data.code === 0, job, smsResult: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/register-jobs/:id/check-sms", async (req, res) => {
+  const job = registrationJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
+  if (!job.smsRequestId) return res.json({ ok: false, error: "no SMS requested" });
+  try {
+    const data = await lubanAPI("getSms", { request_id: job.smsRequestId });
+    if (data.code === 0 && data.msg === "success") {
+      job.smsCode = data.sms_code || "";
+      job.smsStatus = "received";
+      job.updatedAt = new Date().toISOString();
+      const smsJob = smsJobs.get(job.smsRequestId);
+      if (smsJob) {
+        smsJob.smsCode = job.smsCode;
+        smsJob.status = "received";
+        smsJob.updatedAt = job.updatedAt;
+      }
+    } else if (data.code === 400 && data.msg === "wrong_status") {
+      job.smsStatus = "expired";
+      job.updatedAt = new Date().toISOString();
+      const smsJob = smsJobs.get(job.smsRequestId);
+      if (smsJob) { smsJob.status = "expired"; smsJob.updatedAt = job.updatedAt; }
+    }
+    registrationJobs.set(job.id, job);
+    saveAll();
+    res.json({ ok: true, job, smsResult: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.post("/api/register-jobs/:id/complete", (req, res) => {
   const job = registrationJobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "registration job not found" });
@@ -338,10 +405,12 @@ app.post("/api/register-jobs/:id/complete", (req, res) => {
       password: job.password,
       fullName: job.fullName || "",
       age: normalizeAge(job.age) || "",
+      birthDate: job.birthDate || "",
       websiteUrl: job.websiteUrl,
       note: req.body?.note || job.note || "OpenAI 注册完成",
       createdAt: now,
       updatedAt: now,
+      smsPhone: job.smsPhone || "",
     };
   } else {
     account.email = job.email;
@@ -350,6 +419,7 @@ app.post("/api/register-jobs/:id/complete", (req, res) => {
     account.password = job.password;
     account.fullName = job.fullName || account.fullName || "";
     account.age = normalizeAge(job.age) || account.age || "";
+    account.birthDate = job.birthDate || account.birthDate || "";
     account.websiteUrl = job.websiteUrl;
     account.note = req.body?.note || account.note || job.note;
     account.updatedAt = now;
@@ -557,18 +627,73 @@ function generateEmailLocalPart(fullName) {
   const parts = name.split(/[\s.-]+/).filter(Boolean);
   const first = parts[0] || "user";
   const last = parts[1] || "mail";
-  const year = Math.floor(Math.random() * 18) + 1982;
+  const year = generateBirthYear();
+  const twoDigit = String(year).slice(-2);
+  const fourDigit = String(year);
   const short = Math.floor(Math.random() * 90) + 10;
+  const longNum = Math.floor(Math.random() * 90000) + 10000;
+  const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, "0");
+
   const variants = [
     `${first}.${last}`,
     `${first}${last}`,
     `${first}.${last}${short}`,
     `${first}${last}${short}`,
-    `${first}.${last}.${String(year).slice(-2)}`,
+    `${first}.${last}.${twoDigit}`,
+    `${first}${last}${twoDigit}`,
     `${first[0]}${last}${short}`,
+    `${first}.${last}${fourDigit}`,
+    `${first}${last}${fourDigit}`,
+    `${first}_${last}${short}`,
+    `${first}${last}${day}${short}`,
+    `${first}${short}`,
+    `${first}${twoDigit}`,
   ];
   const base = variants[Math.floor(Math.random() * variants.length)];
   return base.slice(0, 48);
+}
+
+function generateFullName() {
+  const firstNames = [
+    "James","John","Robert","Michael","William","David","Richard","Joseph","Thomas","Charles",
+    "Christopher","Daniel","Matthew","Anthony","Mark","Donald","Steven","Paul","Andrew","Joshua",
+    "Kenneth","Kevin","Brian","George","Edward","Ronald","Timothy","Jason","Jeffrey","Ryan",
+    "Jacob","Gary","Nicholas","Eric","Jonathan","Stephen","Larry","Justin","Scott","Brandon",
+    "Benjamin","Samuel","Raymond","Gregory","Frank","Alexander","Patrick","Jack","Dennis","Jerry",
+    "Tyler","Aaron","Jose","Adam","Henry","Nathan","Douglas","Zachary","Peter","Kyle",
+    "Walter","Ethan","Jeremy","Harold","Keith","Christian","Roger","Noah","Gerald","Carl",
+    "Terry","Sean","Austin","Arthur","Lawrence","Jesse","Dylan","Bryan","Joe","Jordan",
+    "Billy","Bruce","Albert","Willie","Gabriel","Logan","Alan","Juan","Wayne","Roy",
+    "Ralph","Randy","Eugene","Vincent","Russell","Elijah","Louis","Bobby","Philip","Johnny",
+    "Bradley","Martin","Cody","Oscar","Emma","Olivia","Ava","Isabella","Sophia","Mia",
+    "Charlotte","Amelia","Harper","Evelyn","Abigail","Emily","Elizabeth","Sofia","Avery","Ella",
+    "Madison","Scarlett","Victoria","Aria","Grace","Chloe","Camila","Penelope","Riley","Layla",
+    "Lillian","Nora","Zoey","Hannah","Lily","Addison","Eleanor","Natalie","Luna","Savannah",
+  ];
+  const lastNames = [
+    "Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Rodriguez","Martinez",
+    "Hernandez","Lopez","Gonzalez","Wilson","Anderson","Thomas","Taylor","Moore","Jackson","Martin",
+    "Lee","Perez","Thompson","White","Harris","Sanchez","Clark","Ramirez","Lewis","Robinson",
+    "Walker","Young","Allen","King","Wright","Scott","Torres","Nguyen","Hill","Flores",
+    "Green","Adams","Nelson","Baker","Hall","Rivera","Campbell","Mitchell","Carter","Roberts",
+    "Gomez","Phillips","Evans","Turner","Diaz","Parker","Cruz","Edwards","Collins","Reyes",
+    "Stewart","Morris","Morales","Murphy","Cook","Rogers","Gutierrez","Ortiz","Morgan","Cooper",
+    "Peterson","Bailey","Reed","Kelly","Howard","Ramos","Kim","Cox","Ward","Richardson",
+    "Watson","Brooks","Chavez","Wood","James","Bennett","Gray","Mendoza","Ruiz","Hughes",
+    "Price","Alvarez","Castillo","Sanders","Patel","Myers","Long","Ross","Foster","Jimenez",
+  ];
+  const f = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const l = lastNames[Math.floor(Math.random() * lastNames.length)];
+  const useMiddle = Math.random() > 0.7;
+  if (useMiddle) {
+    const m = firstNames[Math.floor(Math.random() * firstNames.length)];
+    return `${f} ${m} ${l}`;
+  }
+  return `${f} ${l}`;
+}
+
+function generateBirthYear() {
+  return Math.floor(Math.random() * 18) + 1982;
 }
 
 function generatePassword(length) {
@@ -588,6 +713,14 @@ function generateFullName() {
 
 function generateAdultAge() {
   return Math.floor(Math.random() * 23) + 21;
+}
+
+function generateBirthDate(age) {
+  const a = age || generateAdultAge();
+  const year = new Date().getFullYear() - a - Math.floor(Math.random() * 2);
+  const month = String(Math.floor(Math.random() * 12) + 1).padStart(2, "0");
+  const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, "0");
+  return { year, month, day, text: `${year}-${month}-${day}` };
 }
 
 function normalizeAge(value) {

@@ -169,6 +169,11 @@ function renderRegistrationJobs() {
     }[job.status] || job.status || "待注册";
     const codes = scan?.latestCodes?.length ? scan.latestCodes.join(", ") : "未发现";
     const links = scan?.verificationLinks || [];
+
+    const smsLine = job.smsPhone
+      ? `<span>手机号：${esc(job.smsPhone)} | 验证码：<strong>${esc(job.smsCode || "等待中...")}</strong></span>`
+      : '<span>手机号：未获取</span>';
+
     const item = document.createElement("div");
     item.className = "registration-job";
     item.innerHTML = `
@@ -177,22 +182,24 @@ function renderRegistrationJobs() {
         <span>${esc(job.email)}</span>
         <span>密码：${esc(job.password)}</span>
         <span>姓名：${esc(job.fullName || "-")}</span>
-        <span>年龄：${esc(job.age || "-")}</span>
+        <span>年龄：${esc(job.age || "-")} | 生日：${esc(job.birthDate || "-")}</span>
         <span>状态：${esc(statusText)}</span>
       </div>
       <div class="job-scan">
-        <span>OpenAI 邮件：${scan ? scan.openaiMailCount : 0} / 总邮件：${scan ? scan.mailCount : 0}</span>
-        <span>验证码：${esc(codes)}</span>
+        <span>邮箱：${scan ? scan.openaiMailCount : 0} 封 / 共 ${scan ? scan.mailCount : 0} 封 | 验证码：${esc(codes)}</span>
+        ${smsLine}
         ${links.length ? `<a href="${esc(links[0])}" target="_blank" rel="noopener">打开验证链接</a>` : ""}
       </div>
       <div class="job-actions">
-        <a class="btn-small link-btn" href="${esc(job.websiteUrl)}" target="_blank" rel="noopener">打开注册页</a>
-        <button type="button" class="btn-small" data-action="copy-email">复制邮箱</button>
-        <button type="button" class="btn-small" data-action="copy-password">复制密码</button>
-        <button type="button" class="btn-small" data-action="copy-name">复制姓名</button>
+        <a class="btn-small link-btn" href="${esc(job.websiteUrl)}" target="_blank" rel="noopener">注册页</a>
+        <button type="button" class="btn-small" data-action="copy-email">邮箱</button>
+        <button type="button" class="btn-small" data-action="copy-password">密码</button>
+        <button type="button" class="btn-small" data-action="copy-name">姓名</button>
+        <button type="button" class="btn-small" data-action="request-sms">获取手机号</button>
+        <button type="button" class="btn-small" data-action="check-sms">查验证码</button>
         <button type="button" class="btn-small" data-action="scan">扫描邮件</button>
-        <button type="button" class="btn-small" data-action="complete">标记成功并保存</button>
-        <button type="button" class="btn-small danger" data-action="delete">删除任务</button>
+        <button type="button" class="btn-small" data-action="complete">完成注册</button>
+        <button type="button" class="btn-small danger" data-action="delete">删除</button>
       </div>
     `;
     item.querySelector('[data-action="copy-email"]').addEventListener("click", () => copyText(job.email, "邮箱已复制"));
@@ -201,6 +208,18 @@ function renderRegistrationJobs() {
     item.querySelector('[data-action="scan"]').addEventListener("click", () => scanRegistrationJob(job.id));
     item.querySelector('[data-action="complete"]').addEventListener("click", () => completeRegistrationJob(job.id));
     item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteRegistrationJob(job.id));
+    item.querySelector('[data-action="request-sms"]').addEventListener("click", () => quickRequestJobSms(job.id));
+    item.querySelector('[data-action="check-sms"]').addEventListener("click", () => checkJobSms(job.id));
+    if (job.smsPhone && job.smsStatus !== "received") {
+      // sms is still waiting, auto-poll every 10s
+      const poller = setInterval(async () => {
+        if (!registrationJobs.find((j) => j.id === job.id && j.smsStatus === "waiting")) {
+          clearInterval(poller);
+          return;
+        }
+        await checkJobSms(job.id);
+      }, 10000);
+    }
     container.appendChild(item);
   });
 }
@@ -431,6 +450,54 @@ async function deleteRegistrationJob(id) {
     toast("注册任务已删除");
   } catch (e) {
     toast(e.message, "error");
+  }
+}
+
+async function checkJobSms(jobId) {
+  try {
+    const data = await api(`/api/register-jobs/${encodeURIComponent(jobId)}/check-sms`, { method: "POST" });
+    await loadRegistrationJobs();
+    if (data.job?.smsCode) {
+      toast(`收到短信验证码：${data.job.smsCode}`);
+    }
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function quickRequestJobSms(jobId) {
+  const country = $("#smsCountry").value || "Indonesia";
+  const service = $("#smsService").value || "OpenAI";
+  const lang = $("#smsLanguage").value || "zh";
+  try {
+    const svcData = await api(`/api/sms/services?country=${encodeURIComponent(country)}&service=${encodeURIComponent(service)}&language=${lang}&page=1`);
+    const services = (svcData.msg || []).filter((s) => s.cost < 2);
+    if (services.length === 0) {
+      toast("未找到可用的 OpenAI 接码服务，请手动搜索", "error");
+      await searchSmsServices();
+      return;
+    }
+    const svc = services[Math.floor(Math.random() * Math.min(services.length, 5))];
+    const numData = await api("/api/sms/request-number", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serviceId: svc.service_id }),
+    });
+    if (numData.code === 0 && numData.number) {
+      const linkData = await api(`/api/register-jobs/${encodeURIComponent(jobId)}/request-sms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ smsServiceId: svc.service_id }),
+      });
+      await loadRegistrationJobs();
+      activeSmsJob = { requestId: numData.request_id, number: numData.number, serviceId: svc.service_id, serviceName: svc.service_name };
+      renderActiveSmsJob();
+      startSmsPolling();
+      toast(`获取手机号：${numData.number}`);
+    }
+  } catch (e) {
+    toast(e.message, "error");
+    await searchSmsServices();
   }
 }
 
